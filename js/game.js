@@ -1,0 +1,806 @@
+/* =============================================================
+ *  소리 콩콩 — 게임 코어
+ *  · 타일이 한 칸씩 떨어져 떠 있고, 캐릭터는 한 칸씩 점프해 이동한다
+ *  · 소리와 시각 효과가 항상 짝을 이룬다
+ *  · HUD / 조이스틱 / 보드가 서로 겹치지 않도록 안전 영역을 계산해 배치한다
+ * ============================================================= */
+window.SK = window.SK || {};
+
+SK.Game = (function () {
+
+  /* 타일 사이 간격(격자 단위). 1이면 딱 붙고, 2면 한 칸이 완전히 빈다. */
+  var SPACING = 1.85;
+
+  var GRID = 5;
+  var START = { i: 2, j: 2 };
+
+  // 배경 바닥 재질 — 밟을 때마다 소리가 달라지도록 섞는다
+  var AMBIENT_MATS = [
+    'wood', 'wood', 'keycap', 'cotton', 'leaf', 'bubble',
+    'sand', 'snow', 'glass', 'sponge', 'slime', 'orbeez',
+    'wood', 'sand', 'bubble', 'snow'
+  ];
+
+  function ambientMat(i, j) {
+    var h = (i * 73856093) ^ (j * 19349663);
+    h = (h ^ (h >>> 13)) >>> 0;
+    return AMBIENT_MATS[h % AMBIENT_MATS.length];
+  }
+
+  var cv, ctx, W = 0, H = 0, dpr = 1, scale = 1;
+  var flash = 0, flashColor = '255,255,255';
+  var tiles = [], tileAt = {};
+  var player, cam = { x: 0, y: 0, shake: 0 };
+  var view = { cx: 0, cy: 0 };            // 보드를 그릴 화면 중심(안전 영역 기준)
+  var viewRect = null, boardWorld = null;  // 안전 영역 / 보드 월드 경계
+  var session, fsm;
+  var quizTiles = [];
+  var running = false, lastT = 0, now = 0;
+  var score = 0, combo = 0, streak = 0;
+  var phase = 'idle';                      // idle | play | wrong | solved
+  var phaseTimer = 0;
+  var ui = {};
+
+  var input = { dx: 0, dy: 0, jump: false, jumpHeld: false, keys: Object.create(null) };
+
+  /* =========================================================
+   *  좌표 변환 — 타일 간격을 반영한 격자 → 화면
+   * ======================================================= */
+  function world(gi, gj, gz) {
+    return SK.Iso.toScreen(gi * SPACING, gj * SPACING, gz || 0);
+  }
+
+  /* =========================================================
+   *  초기화
+   * ======================================================= */
+  function boot(canvas, refs) {
+    cv = canvas; ctx = cv.getContext('2d');
+    ui = refs;
+    SK.Tiles.setIso(SK.Iso);
+    SK.Particles.setProjector(function (gi, gj, gz) { return world(gi, gj, gz); });
+
+    pickGrid();
+    buildWorld();
+    player = SK.Player.create(START.i, START.j);
+
+    resize();
+    window.addEventListener('resize', resize);
+    window.addEventListener('orientationchange', function () { setTimeout(resize, 160); });
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+    bindKeys();
+    bindVirtualControls();
+  }
+
+  /** 화면 크기에 맞춰 격자 크기를 고른다 (타일이 잘리지 않도록) */
+  function pickGrid() {
+    var w = window.innerWidth, h = window.innerHeight;
+    var small = Math.min(w, h);
+    GRID = (small < 480 || w < 620) ? 4 : (w < 1100 ? 5 : 6);
+    START = { i: (GRID - 1) >> 1, j: (GRID - 1) >> 1 };
+  }
+
+  function buildWorld() {
+    tiles = []; tileAt = {};
+    for (var i = 0; i < GRID; i++) {
+      for (var j = 0; j < GRID; j++) {
+        var t = SK.Tiles.make(i, j, ambientMat(i, j));
+        tiles.push(t);
+        tileAt[i + ',' + j] = t;
+      }
+    }
+  }
+
+  function getTile(i, j) { return tileAt[i + ',' + j] || null; }
+  function inBounds(i, j) { return i >= 0 && j >= 0 && i < GRID && j < GRID; }
+
+  /* =========================================================
+   *  퀴즈
+   * ======================================================= */
+  function startWith(quizzes, sourceLabel) {
+    session = SK.Quiz.createSession(quizzes);
+    fsm = SK.Quiz.createMachine();
+    if (ui.loadNote) ui.loadNote.textContent = '문제 ' + quizzes.length + '개 · ' + sourceLabel;
+    nextQuiz();
+    if (!running) { running = true; lastT = performance.now(); requestAnimationFrame(loop); }
+  }
+
+  function nextQuiz() {
+    var q = session.next();
+    if (!q) { ui.prompt.textContent = '해당 과목의 문제가 없습니다.'; return; }
+    fsm.setQuiz(q);
+    layoutQuiz(q);
+    phase = 'play';
+    SK.Audio.newQuiz();
+    renderHUD(true);
+  }
+
+  /** 문제 타일을 바닥에 뿌린다 */
+  function layoutQuiz(q) {
+    for (var k = 0; k < quizTiles.length; k++) {
+      var old = quizTiles[k];
+      old.label = null; old.role = 'plain'; old.payload = null;
+      old.state = 'idle'; old.hi = 0; old.order = -1; old.correct = false;
+      old.mat = ambientMat(old.i, old.j);
+      SK.Tiles.reset(old);
+    }
+    quizTiles = [];
+
+    var cells = pickCells();
+    var items = SK.Quiz.plan(q, cells.length);
+
+    for (var n = 0; n < items.length && n < cells.length; n++) {
+      var c = cells[n], it = items[n];
+      var t = getTile(c.i, c.j);
+      if (!t) continue;
+      t.label = it.label;
+      t.payload = it.token;
+      t.role = 'seq';
+      t.order = it.order;
+      t.correct = it.correct;
+      t.state = 'idle';
+      t.hi = 0;
+      t.mat = q.material;
+      SK.Tiles.reset(t);
+      quizTiles.push(t);
+    }
+  }
+
+  /** 캐릭터가 서 있는 칸을 뺀 모든 칸을 섞어서 돌려준다 */
+  function pickCells() {
+    var cand = [];
+    for (var i = 0; i < GRID; i++) {
+      for (var j = 0; j < GRID; j++) {
+        if (player && i === player.ci && j === player.cj) continue;
+        cand.push({ i: i, j: j });
+      }
+    }
+    return SK.Quiz.shuffle(cand);
+  }
+
+  /* =========================================================
+   *  입력 — 키보드
+   * ======================================================= */
+  var KEYMAP = {
+    ArrowUp: 'up', KeyW: 'up',
+    ArrowDown: 'down', KeyS: 'down',
+    ArrowLeft: 'left', KeyA: 'left',
+    ArrowRight: 'right', KeyD: 'right',
+    Space: 'jump', Enter: 'jump'
+  };
+
+  function bindKeys() {
+    window.addEventListener('keydown', function (e) {
+      var k = KEYMAP[e.code];
+      if (!k) return;
+      e.preventDefault();
+      if (k === 'jump') { if (!input.keys.jump) input.jump = true; input.jumpHeld = true; }
+      input.keys[k] = true;
+      syncKeyDir();
+    });
+    window.addEventListener('keyup', function (e) {
+      var k = KEYMAP[e.code];
+      if (!k) return;
+      e.preventDefault();
+      if (k === 'jump') input.jumpHeld = false;
+      input.keys[k] = false;
+      syncKeyDir();
+    });
+    window.addEventListener('blur', function () {
+      input.keys = Object.create(null);
+      input.jumpHeld = false;
+      syncKeyDir();
+    });
+  }
+
+  function syncKeyDir() {
+    if (padActive) return;                 // 조이스틱 입력이 우선
+    input.dx = (input.keys.right ? 1 : 0) - (input.keys.left ? 1 : 0);
+    input.dy = (input.keys.down ? 1 : 0) - (input.keys.up ? 1 : 0);
+  }
+
+  /* =========================================================
+   *  입력 — 가상 조이스틱 / 점프 버튼 (Pointer Events)
+   *  터치·마우스·스타일러스를 같은 코드로 처리한다.
+   * ======================================================= */
+  var padActive = false;
+
+  function bindVirtualControls() {
+    var pad = document.getElementById('touchPad');
+    var nub = document.getElementById('touchNub');
+    var jmp = document.getElementById('touchJump');
+    if (!pad || !jmp) return;
+
+    var padId = null, cx = 0, cy = 0, radius = 46;
+
+    function updateFrom(e) {
+      var dx = e.clientX - cx, dy = e.clientY - cy;
+      var len = Math.hypot(dx, dy);
+      var k = len > radius ? radius / len : 1;
+      nub.style.transform = 'translate(' + (dx * k) + 'px,' + (dy * k) + 'px)';
+      if (len < 12) { input.dx = 0; input.dy = 0; return; }
+      input.dx = dx / len;
+      input.dy = dy / len;
+    }
+
+    pad.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      padId = e.pointerId;
+      padActive = true;
+      try { pad.setPointerCapture(e.pointerId); } catch (_) { }
+      var r = pad.getBoundingClientRect();
+      cx = r.left + r.width / 2; cy = r.top + r.height / 2;
+      radius = r.width * 0.38;
+      pad.classList.add('active');
+      updateFrom(e);
+    });
+    pad.addEventListener('pointermove', function (e) {
+      if (e.pointerId !== padId) return;
+      e.preventDefault();
+      updateFrom(e);
+    });
+    function endPad(e) {
+      if (padId !== null && e.pointerId !== padId) return;
+      padId = null; padActive = false;
+      input.dx = 0; input.dy = 0;
+      nub.style.transform = '';
+      pad.classList.remove('active');
+      syncKeyDir();
+    }
+    pad.addEventListener('pointerup', endPad);
+    pad.addEventListener('pointercancel', endPad);
+
+    jmp.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      input.jump = true;
+      input.jumpHeld = true;
+      try { jmp.setPointerCapture(e.pointerId); } catch (_) { }
+      jmp.classList.add('active');
+    });
+    function endJump() { input.jumpHeld = false; jmp.classList.remove('active'); }
+    jmp.addEventListener('pointerup', endJump);
+    jmp.addEventListener('pointercancel', endJump);
+    jmp.addEventListener('pointerleave', endJump);
+  }
+
+  /* =========================================================
+   *  레이아웃 — HUD / 컨트롤과 겹치지 않는 안전 영역에 보드를 배치
+   * ======================================================= */
+  function safeRect() {
+    var gap = 10;
+    var top = gap, bottom = H - gap, left = gap, right = W - gap;
+
+    var hud = ui.hud && ui.hud.getBoundingClientRect();
+    if (hud && hud.height) top = hud.bottom + 6;
+
+    var padEl = document.getElementById('touchPad');
+    var jmpEl = document.getElementById('touchJump');
+    var visible = padEl && padEl.offsetParent !== null;
+
+    if (visible) {
+      var pr = padEl.getBoundingClientRect();
+      var jr = jmpEl.getBoundingClientRect();
+      var ctrlTop = Math.min(pr.top, jr.top);
+      var vertical = ctrlTop - 6 - top;
+
+      // 세로 공간이 넉넉하면 컨트롤 위쪽 띠를 쓰고,
+      // 부족하면(가로로 납작한 태블릿) 컨트롤 사이의 가운데 공간을 쓴다.
+      if (vertical >= 250) {
+        bottom = ctrlTop - 6;
+      } else {
+        left = Math.max(left, pr.right + 12);
+        right = Math.min(right, jr.left - 12);
+      }
+    }
+
+    var foot = ui.loadNote && ui.loadNote.getBoundingClientRect();
+    if (foot && foot.height && bottom > foot.top - 4) {
+      bottom = Math.max(top + 140, foot.top - 4);
+    }
+
+    return {
+      x: left, y: top,
+      w: Math.max(140, right - left),
+      h: Math.max(140, bottom - top)
+    };
+  }
+
+  function resize() {
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = cv.clientWidth; H = cv.clientHeight;
+    if (!W || !H) return;
+    cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr);
+
+    // 격자 크기가 바뀔 만큼 화면이 변하면 월드를 다시 만든다
+    var before = GRID;
+    pickGrid();
+    if (GRID !== before && player) {
+      buildWorld();
+      player.ci = Math.min(player.ci, GRID - 1);
+      player.cj = Math.min(player.cj, GRID - 1);
+      player.x = player.ci; player.y = player.cj;
+      player.hopping = false;
+      if (fsm && fsm.quiz) { quizTiles = []; layoutQuiz(fsm.quiz); }
+    }
+
+    viewRect = safeRect();
+    boardWorld = computeBoardWorld();
+
+    var boardW = (boardWorld.maxX - boardWorld.minX) + 16;
+    var boardH = (boardWorld.maxY - boardWorld.minY) + 16;
+
+    scale = Math.min(viewRect.w / boardW, viewRect.h / boardH);
+    scale = Math.max(0.26, Math.min(1.15, scale));
+
+    view.cx = viewRect.x + viewRect.w / 2;
+    view.cy = viewRect.y + viewRect.h / 2;
+    clampCam();
+  }
+
+  /** 캐릭터가 뛰어올랐을 때 머리가 잘리지 않도록 보드 위쪽에 두는 여유(px) */
+  var JUMP_CLEARANCE = 84;
+
+  /** 타일 전체가 차지하는 월드 좌표 범위 */
+  function computeBoardWorld() {
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (var k = 0; k < tiles.length; k++) {
+      var t = tiles[k];
+      var s = world(t.i, t.j, 0);
+      var th = SK.Tiles.thicknessOf(t);
+      if (s.x - SK.Iso.TW / 2 < minX) minX = s.x - SK.Iso.TW / 2;
+      if (s.x + SK.Iso.TW / 2 > maxX) maxX = s.x + SK.Iso.TW / 2;
+      if (s.y - th - SK.Iso.TH / 2 < minY) minY = s.y - th - SK.Iso.TH / 2;
+      if (s.y + SK.Iso.TH / 2 > maxY) maxY = s.y + SK.Iso.TH / 2;
+    }
+    minY -= JUMP_CLEARANCE;
+    return { minX: minX, maxX: maxX, minY: minY, maxY: maxY };
+  }
+
+  /**
+   * 카메라를 보드 경계 안에 묶는다.
+   * 보드가 안전 영역보다 작으면 아예 중앙에 고정해, 캐릭터를 따라가다
+   * 보드가 화면 밖으로 밀려나는 일이 없게 한다.
+   */
+  function clampCam() {
+    if (!boardWorld || !viewRect) return;
+    var halfW = (viewRect.w / 2) / scale;
+    var halfH = (viewRect.h / 2) / scale;
+
+    var xLo = boardWorld.maxX - halfW, xHi = boardWorld.minX + halfW;
+    var yLo = boardWorld.maxY - halfH, yHi = boardWorld.minY + halfH;
+
+    cam.x = (xLo > xHi) ? (boardWorld.minX + boardWorld.maxX) / 2
+      : Math.max(xLo, Math.min(xHi, cam.x));
+    cam.y = (yLo > yHi) ? (boardWorld.minY + boardWorld.maxY) / 2
+      : Math.max(yLo, Math.min(yHi, cam.y));
+  }
+
+  /** 화면 좌우 위치를 오디오 패닝 값으로 (-1 ~ +1) */
+  function panOf(gi, gj) {
+    var s = world(gi, gj, 0);
+    var px = (s.x - cam.x) * scale;
+    return Math.max(-1, Math.min(1, px / Math.max(1, W / 2)));
+  }
+  function depthOf(gi, gj) {
+    var s = world(gi, gj, 0);
+    return Math.max(0, Math.min(1, Math.abs(s.y - cam.y) * scale / 340));
+  }
+
+  /* =========================================================
+   *  루프
+   * ======================================================= */
+  function loop(ts) {
+    var dt = Math.min(0.05, (ts - lastT) / 1000);
+    lastT = ts; now = ts / 1000;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  var worldApi = {
+    canEnter: function (i, j) {
+      if (!inBounds(i, j)) return false;
+      return SK.Tiles.isSolid(getTile(i, j));
+    },
+    surfaceOf: function (i, j) {
+      return SK.Tiles.surfaceOffset(getTile(i, j));
+    }
+  };
+
+  function update(dt) {
+    if (phaseTimer > 0) {
+      phaseTimer -= dt;
+      if (phaseTimer <= 0) {
+        if (phase === 'wrong') { fsm.resume(); phase = 'play'; clearWrongMarks(); }
+        else if (phase === 'solved') nextQuiz();
+      }
+    }
+
+    // 점프 입력은 '눌림 유지' 방식 — 조준을 먼저 잡고 눌러도, 누른 채 조준을 바꿔도 뛴다
+    var wantJump = input.jump || input.jumpHeld;
+    SK.Player.update(player, { dx: input.dx, dy: input.dy, jump: wantJump }, dt, worldApi, {
+      onTakeoff: function (power) { SK.Audio.whoosh(power, panOf(player.x, player.y)); },
+      onLand: function (intensity, power, i, j) { land(intensity, power, i, j); }
+    });
+    input.jump = false;
+
+    // 점프 궤적 (소리 ↔ 시각 연결)
+    if (player.hopping && Math.random() < 0.55) {
+      SK.Particles.trail(player.x, player.y, player.z * 0.9, player.power);
+    }
+
+    for (var i = 0; i < tiles.length; i++) SK.Tiles.update(tiles[i], dt, now);
+    updateAim(dt);
+    updateHints(dt);
+
+    // 카메라 — 보드 중심에서 캐릭터 쪽으로 조금만 따라간다
+    var bc = world((GRID - 1) / 2, (GRID - 1) / 2, 0);
+    var ps = world(player.x, player.y, 0);
+    cam.x += (bc.x * 0.72 + ps.x * 0.28 - cam.x) * Math.min(1, dt * 5);
+    cam.y += (bc.y * 0.72 + ps.y * 0.28 - cam.y) * Math.min(1, dt * 5);
+    clampCam();   // 보드가 절대 화면 밖으로 밀려나지 않게
+    if (cam.shake > 0) cam.shake = Math.max(0, cam.shake - dt * 3.2);
+    if (flash > 0) flash = Math.max(0, flash - dt * 2.6);
+
+    SK.Particles.update(dt);
+  }
+
+  /** 지금 점프하면 어디에 착지하는지 타일에 표시한다 */
+  function updateAim(dt) {
+    var target = null;
+    if (!player.hopping && player.stunTimer <= 0 && player.aimDir) {
+      var ni = player.ci + player.aimDir.di;
+      var nj = player.cj + player.aimDir.dj;
+      if (worldApi.canEnter(ni, nj)) target = getTile(ni, nj);
+    }
+    for (var k = 0; k < tiles.length; k++) {
+      var t = tiles[k];
+      var want = (t === target) ? 1 : 0;
+      t.aim += (want - t.aim) * Math.min(1, dt * 14);
+      if (t.aim < 0.01) t.aim = 0;
+    }
+  }
+
+  function updateHints(dt) {
+    var show = fsm && fsm.quiz && fsm.mistakes >= 2 && phase === 'play';
+    var exp = show ? fsm.expected() : null;
+    for (var k = 0; k < quizTiles.length; k++) {
+      var t = quizTiles[k];
+      var want = (exp != null && t.payload === exp) ? 1 : 0;
+      t.hi += (want - t.hi) * Math.min(1, dt * 6);
+      if (t.hi < 0.01) t.hi = 0;
+    }
+  }
+
+  /* =========================================================
+   *  착지 — 소리와 시각 효과를 항상 함께 낸다
+   * ======================================================= */
+  function land(intensity, power, i, j) {
+    var t = getTile(i, j);
+    if (!t) return;
+    var mat = t.mat;
+    var pan = panOf(i, j), depth = depthOf(i, j);
+
+    var res = SK.Tiles.stomp(t, intensity, now, power);
+
+    switch (res.sound) {
+      case 'shatter':
+        // 시각: Tiles.stomp 안에서 Particles.shatter 가 이미 터졌다
+        SK.Audio.shatter(mat, { pan: pan, depth: depth });
+        cam.shake = Math.max(cam.shake, 0.55);
+        setFlash(0.32, SK.Particles.pal(mat).hue);
+        break;
+      case 'crack':
+        SK.Audio.crack(mat, res.stage, res.total, { pan: pan, depth: depth });
+        break;
+      case 'hollow':
+        SK.Audio.hollow({ pan: pan });
+        break;
+      default:
+        SK.Audio.step(mat, { intensity: intensity, pan: pan, depth: depth, stomp: power > 1 });
+    }
+
+    // 모든 착지음에 짝을 이루는 파문 + 먼지
+    if (res.sound !== 'hollow') {
+      SK.Particles.stepBurst(i, j, mat, Math.min(1, intensity * res.gain), power);
+    }
+    if (power > 1) {
+      cam.shake = Math.max(cam.shake, 0.45);
+      SK.Particles.text(i, j, '쿵!', { size: 24, color: '#ffffff', life: 0.6, gz: 0.4, vz: 0.03 });
+    }
+
+    visit(t);
+  }
+
+  /* =========================================================
+   *  퀴즈 판정
+   * ======================================================= */
+  function visit(t) {
+    if (phase !== 'play' || !fsm || fsm.state !== 'PLAY') return;
+    if (!t || t.role === 'plain' || t.payload == null) return;
+
+    var exp = fsm.expected();
+    // 이미 완료된 타일을 다시 지나가는 것은 실수가 아니다
+    if (t.state === 'done' && t.payload !== exp) return;
+
+    var r = fsm.submit(t.payload);
+    var pan = panOf(t.i, t.j);
+
+    if (r.type === 'progress' || r.type === 'solved') {
+      t.state = 'done';
+      t.flash = 1;
+      // 정답 타일은 별빛과 함께 원래대로 복구된다 —
+      // 소모성 재질이라도 정답 진행이 막히는 일이 없도록.
+      SK.Tiles.reset(t);
+      SK.Audio.stepCorrect(r.index, { pan: pan });
+      SK.Particles.stars(t.i, t.j, 18);
+      SK.Particles.ring(t.i, t.j, { size: 105, life: 0.45, width: 4, color: 'rgba(142,240,192,' });
+      SK.Particles.text(t.i, t.j, POP_WORDS[r.index % POP_WORDS.length], {
+        size: 22, color: '#8ef0c0', life: 0.8
+      });
+      streak++;
+      combo = Math.min(9, 1 + Math.floor(streak / 4));
+      score += 10 * combo;
+      if (r.type === 'solved') onSolved(t, pan);
+      renderHUD();
+    } else if (r.type === 'wrong') {
+      onWrong(t, pan);
+    }
+  }
+
+  var POP_WORDS = ['TOK!', 'POP!', 'TAP!', 'CLICK!', 'PLOP!', 'TING!'];
+
+  function onSolved(t, pan) {
+    phase = 'solved';
+    phaseTimer = 2.1;
+    score += 50 * combo;
+    SK.Audio.solveBurst({ pan: pan });
+    SK.Particles.celebrate(t.i, t.j);
+    setFlash(0.4, 48);
+    SK.Particles.text(t.i, t.j, 'CRACKLE-POP!', { size: 32, color: '#ffd66b', gz: 0.9, life: 1.4 });
+    SK.Particles.text(player.x, player.y, 'PERFECT!', { size: 38, color: '#ffffff', gz: 1.5, life: 1.5, tilt: -0.06 });
+    cam.shake = 0.9;
+    for (var k = 0; k < quizTiles.length; k++) {
+      if (quizTiles[k].correct) {
+        quizTiles[k].state = 'done';
+        quizTiles[k].flash = 1;
+        SK.Particles.stars(quizTiles[k].i, quizTiles[k].j, 8);
+      }
+    }
+    renderHUD();
+  }
+
+  function onWrong(t, pan) {
+    phase = 'wrong';
+    phaseTimer = 0.8;
+    t.state = 'wrong';
+    streak = 0; combo = 0;
+    score = Math.max(0, score - 5);
+    SK.Audio.wrong({ pan: pan });
+    SK.Particles.text(t.i, t.j, 'THUD…', { size: 24, color: '#ff9aa8', life: 0.9, vz: 0.01 });
+    SK.Particles.ring(t.i, t.j, { size: 90, life: 0.5, color: 'rgba(255,154,168,' });
+    cam.shake = 0.8;
+    SK.Player.stun(player, 0.6);
+    for (var k = 0; k < quizTiles.length; k++) {
+      if (quizTiles[k] !== t) quizTiles[k].state = 'idle';
+    }
+    renderHUD(false, true);
+  }
+
+  /** 화면 전체가 순간 번쩍인다 (파괴·정답 완성) */
+  function setFlash(amount, hue) {
+    flash = Math.max(flash, amount);
+    if (hue != null) {
+      var c = hslToRgb(hue, 0.85, 0.8);
+      flashColor = c[0] + ',' + c[1] + ',' + c[2];
+    } else {
+      flashColor = '255,255,255';
+    }
+  }
+
+  function hslToRgb(h, s2, l) {
+    h = (h % 360) / 360;
+    var q = l < 0.5 ? l * (1 + s2) : l + s2 - l * s2;
+    var pp = 2 * l - q;
+    var f = function (t) {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1 / 6) return pp + (q - pp) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return pp + (q - pp) * (2 / 3 - t) * 6;
+      return pp;
+    };
+    return [Math.round(f(h + 1 / 3) * 255), Math.round(f(h) * 255), Math.round(f(h - 1 / 3) * 255)];
+  }
+
+  function clearWrongMarks() {
+    for (var k = 0; k < quizTiles.length; k++) {
+      if (quizTiles[k].state === 'wrong') quizTiles[k].state = 'idle';
+    }
+    renderHUD();
+  }
+
+  /* =========================================================
+   *  HUD
+   * ======================================================= */
+  var SUBJECT_KO = { social: '사회', math: '수학' };
+
+  function renderHUD(isNew, shakeSlots) {
+    var q = fsm && fsm.quiz;
+    if (!q) return;
+
+    ui.subjectBadge.textContent = SUBJECT_KO[q.subject] || q.subject;
+    ui.subjectBadge.style.background = q.subject === 'math' ? '#8ef0c0' : '#ffd66b';
+    ui.topicBadge.textContent = q.topic || '기본';
+    ui.scoreVal.textContent = score;
+    ui.comboVal.textContent = combo > 1 ? '×' + combo : '';
+
+    if (isNew) ui.prompt.textContent = q.prompt;
+
+    if (phase === 'solved') {
+      ui.hint.textContent = q.reveal || ('정답! ' + q.answer);
+      ui.hint.className = 'hint good';
+    } else if (fsm.mistakes >= 2 && q.hint) {
+      ui.hint.textContent = '힌트 · ' + q.hint;
+      ui.hint.className = 'hint';
+    } else {
+      ui.hint.textContent = '한 글자씩 순서대로 밟으세요';
+      ui.hint.className = 'hint';
+    }
+
+    var total = fsm.total(), prog = fsm.progress, html = '';
+    for (var i = 0; i < total; i++) {
+      var cls = 'slot', ch = '';
+      if (i < prog.length) { cls += ' filled'; ch = esc(prog[i]); }
+      else if (i === prog.length) cls += ' next';
+      if (shakeSlots) cls += ' wrong';
+      html += '<div class="' + cls + '">' + ch + '</div>';
+    }
+    ui.slots.innerHTML = html;
+
+    scheduleRelayout();   // HUD 높이가 바뀌면 보드 안전 영역도 다시 계산
+  }
+
+  var relayoutPending = false;
+  function scheduleRelayout() {
+    if (relayoutPending) return;
+    relayoutPending = true;
+    requestAnimationFrame(function () { relayoutPending = false; resize(); });
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c];
+    });
+  }
+
+  /* =========================================================
+   *  렌더
+   * ======================================================= */
+  function render() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    var bg = ctx.createRadialGradient(view.cx, view.cy, 40, view.cx, view.cy, Math.max(W, H) * 0.8);
+    bg.addColorStop(0, 'rgba(70,78,140,.5)');
+    bg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+    var shx = cam.shake ? (Math.random() - 0.5) * 14 * cam.shake : 0;
+    var shy = cam.shake ? (Math.random() - 0.5) * 14 * cam.shake : 0;
+
+    ctx.save();
+    ctx.translate(view.cx + shx, view.cy + shy);
+    ctx.scale(scale, scale);
+    ctx.translate(-cam.x, -cam.y);
+
+    // 페인터 알고리즘 — 깊이(i+j) 순
+    var list = [];
+    for (var k = 0; k < tiles.length; k++) {
+      list.push({ d: tiles[k].i + tiles[k].j, kind: 't', o: tiles[k] });
+    }
+    list.push({ d: player.x + player.y + 0.02, kind: 'p', o: player });
+    list.sort(function (a, b) { return a.d - b.d; });
+
+    for (var n = 0; n < list.length; n++) {
+      var e = list[n];
+      if (e.kind === 't') {
+        var s = world(e.o.i, e.o.j, 0);
+        SK.Tiles.draw(ctx, e.o, now, s.x, s.y);
+      } else {
+        var ps = world(player.x, player.y, 0);
+        SK.Player.draw(ctx, player, now, ps.x, ps.y, player.z * SK.Iso.TZ * 2);
+      }
+    }
+
+    SK.Particles.draw(ctx, SK.Iso);
+    ctx.restore();
+
+    // 화면 플래시 — 파괴·정답 완성의 순간을 강조
+    if (flash > 0.01) {
+      ctx.fillStyle = 'rgba(' + flashColor + ',' + (flash * 0.5) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  /* =========================================================
+   *  외부 제어
+   * ======================================================= */
+  function setSubject(f) {
+    if (!session) return;
+    session.setFilter(f);
+    if (!session.pool().length) { ui.prompt.textContent = '해당 과목의 문제가 없습니다.'; return; }
+    phase = 'play'; phaseTimer = 0;
+    nextQuiz();
+  }
+
+  function skip() {
+    if (!session) return;
+    phase = 'play'; phaseTimer = 0;
+    nextQuiz();
+  }
+
+  return {
+    boot: boot,
+    startWith: startWith,
+    setSubject: setSubject,
+    skip: skip,
+    relayout: resize,
+    getScore: function () { return score; },
+
+    /** 디버그 / 자동 테스트용 훅 */
+    debug: {
+      state: function () {
+        return {
+          phase: phase,
+          fsmState: fsm && fsm.state,
+          quizId: fsm && fsm.quiz && fsm.quiz.id,
+          expected: fsm && fsm.expected(),
+          progress: fsm ? fsm.progress.slice() : [],
+          grid: GRID, spacing: SPACING, scale: scale,
+          player: { ci: player.ci, cj: player.cj, z: player.z, surface: player.surface },
+          tiles: quizTiles.map(function (t) {
+            return {
+              i: t.i, j: t.j, label: t.label, correct: t.correct, order: t.order,
+              state: t.state, mat: t.mat, damage: t.damage, broken: t.broken
+            };
+          })
+        };
+      },
+      tick: function (dt) { now += dt; update(dt); render(); },
+      /** 특정 타일에 착지시켜 판정을 발생시킨다 */
+      stepOn: function (i, j, power) {
+        player.ci = i; player.cj = j;
+        player.x = i; player.y = j; player.z = 0;
+        player.hopping = false;
+        land(power > 1 ? 1 : 0.5, power || 1, i, j);
+        return fsm.progress.slice();
+      },
+      press: function (dx, dy, jump) { input.dx = dx; input.dy = dy; if (jump) input.jump = true; },
+      release: function () { input.dx = 0; input.dy = 0; },
+      safeRect: safeRect,
+      /** 지금 조준 표시가 켜진 타일 수 (0 또는 1) */
+      aimCount: function () {
+        var n = 0;
+        for (var k = 0; k < tiles.length; k++) if (tiles[k].aim > 0.5) n++;
+        return n;
+      },
+      /** 실제로 그려지는 보드의 화면 경계 — 레이아웃 겹침 자동 점검용 */
+      boardBounds: function () {
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (var k = 0; k < tiles.length; k++) {
+          var t = tiles[k];
+          var s = world(t.i, t.j, 0);
+          var th = SK.Tiles.thicknessOf(t);
+          minX = Math.min(minX, s.x - SK.Iso.TW / 2);
+          maxX = Math.max(maxX, s.x + SK.Iso.TW / 2);
+          minY = Math.min(minY, s.y - th - SK.Iso.TH / 2);
+          maxY = Math.max(maxY, s.y + SK.Iso.TH / 2);
+        }
+        var toScreen = function (wx, wy) {
+          return { x: view.cx + (wx - cam.x) * scale, y: view.cy + (wy - cam.y) * scale };
+        };
+        var a = toScreen(minX, minY), b = toScreen(maxX, maxY);
+        return { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y, right: b.x, bottom: b.y };
+      }
+    }
+  };
+})();

@@ -1,0 +1,200 @@
+/* =============================================================
+ *  소리 콩콩 — 레이아웃
+ *  원칙: HUD(문제) · 보드 · 조이스틱은 절대 서로를 가리지 않는다.
+ *        HUD와 컨트롤은 화면 가장자리에 고정되고,
+ *        캔버스는 남은 "안전 영역"을 JS에서 측정해 보드를 그 안에 맞춘다.
+ * ============================================================= */
+:root{
+  --bg1:#1b2140; --bg2:#2b2f5e; --ink:#f4f6ff; --dim:rgba(244,246,255,.62);
+  --accent:#ffd66b; --good:#8ef0c0; --bad:#ff9aa8;
+  --st: env(safe-area-inset-top, 0px);
+  --sb: env(safe-area-inset-bottom, 0px);
+  --sl: env(safe-area-inset-left, 0px);
+  --sr: env(safe-area-inset-right, 0px);
+
+  /* 컨트롤 크기 — 화면에 따라 아래 미디어쿼리에서 조정 */
+  --pad-size: 132px;
+  --jump-size: 92px;
+  --ctrl-gap: 18px;
+
+  --font-ko:"Pretendard","Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%;overscroll-behavior:none}
+body{
+  margin:0;background:radial-gradient(120% 90% at 50% 0%,var(--bg2),var(--bg1) 70%);
+  color:var(--ink);font-family:var(--font-ko);overflow:hidden;
+  -webkit-user-select:none;user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:none;
+}
+#stage{position:fixed;inset:0}
+#game{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+/* ================= 상단 HUD ================= */
+#hud{
+  position:absolute;left:0;right:0;top:0;z-index:5;
+  padding:calc(10px + var(--st)) calc(14px + var(--sr)) 12px calc(14px + var(--sl));
+  background:linear-gradient(180deg,rgba(12,14,32,.9),rgba(12,14,32,.55) 62%,rgba(12,14,32,0));
+  pointer-events:none;text-align:center;
+}
+.hud-row{display:flex;align-items:center;gap:8px;max-width:1000px;margin:0 auto 6px}
+.spacer{flex:1 1 auto}
+.badge{
+  font-size:12px;font-weight:800;letter-spacing:.03em;padding:4px 10px;border-radius:999px;
+  background:var(--accent);color:#2a2410;white-space:nowrap;
+}
+.badge.ghost{background:rgba(255,255,255,.14);color:var(--dim)}
+#scoreBox{font-size:12px;color:var(--dim);display:flex;align-items:baseline;gap:5px;white-space:nowrap}
+#scoreVal{font-size:19px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
+.combo{color:var(--accent);font-weight:800;font-size:14px}
+
+.icon-btn{
+  pointer-events:auto;font-family:inherit;font-size:17px;line-height:1;color:var(--ink);
+  background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
+  width:38px;height:38px;border-radius:12px;cursor:pointer;flex:0 0 auto;
+}
+.icon-btn:active{background:rgba(255,255,255,.26)}
+
+#prompt{
+  margin:2px auto 9px;max-width:min(94vw,1000px);
+  font-size:clamp(15px,2.6vw,27px);line-height:1.34;font-weight:800;
+  text-shadow:0 2px 14px rgba(0,0,0,.6);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.slots{display:flex;gap:7px;justify-content:center;flex-wrap:wrap;min-height:40px}
+.slot{
+  width:40px;height:40px;border-radius:11px;display:grid;place-items:center;
+  font-size:21px;font-weight:800;
+  background:rgba(255,255,255,.08);border:2px dashed rgba(255,255,255,.22);
+  transition:transform .18s cubic-bezier(.2,1.6,.4,1),background .18s,border-color .18s;
+}
+.slot.filled{background:var(--good);color:#0e2b20;border:2px solid #fff;transform:scale(1.1)}
+.slot.next{border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,214,107,.22)}
+.slot.wrong{background:var(--bad);color:#3a0d15;border-style:solid;animation:shakeX .3s}
+@keyframes shakeX{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.hint{margin:7px 0 0;font-size:12.5px;color:var(--dim);min-height:17px}
+.hint.good{color:var(--good)}
+
+/* ================= 메뉴 ================= */
+#menuPanel{
+  position:absolute;z-index:8;
+  top:calc(54px + var(--st));right:calc(14px + var(--sr));
+  width:min(272px,82vw);padding:12px;border-radius:16px;
+  background:rgba(22,26,52,.96);border:1px solid rgba(255,255,255,.16);
+  box-shadow:0 18px 40px rgba(0,0,0,.45);
+  display:flex;flex-direction:column;gap:8px;
+  max-height:calc(100vh - 80px - var(--st) - var(--sb));overflow-y:auto;overscroll-behavior:contain;
+}
+#menuPanel[hidden]{display:none}
+.menu-group{display:flex;gap:6px}
+.ctl{
+  font-family:inherit;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer;
+  background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);
+  padding:10px 12px;border-radius:11px;flex:1 1 auto;white-space:nowrap;
+}
+.ctl.wide{width:100%;text-align:left}
+.ctl:active{background:rgba(255,255,255,.24)}
+.ctl.active{background:var(--accent);color:#2a2410;border-color:transparent}
+.menu-note{margin:2px 0 0;font-size:11px;color:var(--dim);line-height:1.6}
+.menu-note b{color:var(--ink)}
+
+/* 소리 도감 — 타일 생김새와 소리를 짝지어 보여 준다 */
+.legend{border-top:1px solid rgba(255,255,255,.14);padding-top:9px;margin-top:2px}
+.legend-title{font-size:11px;font-weight:800;color:var(--dim);margin-bottom:6px}
+.legend-title span{font-weight:500;opacity:.75}
+#legendList{
+  display:flex;flex-direction:column;gap:4px;
+  max-height:min(40vh,300px);overflow-y:auto;overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;padding-right:2px;
+}
+#legendList::-webkit-scrollbar{width:5px}
+#legendList::-webkit-scrollbar-thumb{background:rgba(255,255,255,.22);border-radius:3px}
+.legend-item{
+  display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:9px;cursor:pointer;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+  font-family:inherit;color:var(--ink);text-align:left;width:100%;
+}
+.legend-item:active{background:rgba(255,255,255,.2)}
+.legend-item canvas{flex:0 0 auto;width:36px;height:27px}
+.legend-name{font-size:12px;font-weight:800;white-space:nowrap}
+.legend-sound{font-size:11px;color:var(--accent);font-weight:800;white-space:nowrap}
+.legend-hits{
+  margin-left:auto;font-size:10px;color:var(--dim);white-space:nowrap;
+  flex:0 0 auto;
+}
+
+/* ================= 가상 조이스틱 / 점프 ================= */
+#touchPad{
+  position:absolute;z-index:7;
+  left:calc(var(--ctrl-gap) + var(--sl));
+  bottom:calc(var(--ctrl-gap) + var(--sb));
+  width:var(--pad-size);height:var(--pad-size);border-radius:50%;
+  background:rgba(255,255,255,.07);border:2px solid rgba(255,255,255,.16);
+  display:grid;place-items:center;touch-action:none;
+  backdrop-filter:blur(4px);
+}
+#touchPad.active{background:rgba(255,255,255,.13);border-color:rgba(255,214,107,.6)}
+#touchNub{
+  width:calc(var(--pad-size) * .4);height:calc(var(--pad-size) * .4);border-radius:50%;
+  background:rgba(255,255,255,.34);border:1px solid rgba(255,255,255,.4);
+  pointer-events:none;transition:transform .05s linear;
+}
+#touchJump{
+  position:absolute;z-index:7;
+  right:calc(var(--ctrl-gap) + var(--sr));
+  bottom:calc(var(--ctrl-gap) + var(--sb));
+  width:var(--jump-size);height:var(--jump-size);border-radius:50%;
+  font-family:inherit;font-size:calc(var(--jump-size) * .26);font-weight:900;
+  color:#2a2410;background:var(--accent);border:0;cursor:pointer;touch-action:none;
+  box-shadow:0 6px 18px rgba(0,0,0,.35);
+}
+#touchJump.active{transform:scale(.93);background:#ffc233}
+body.no-pads #touchPad,body.no-pads #touchJump{display:none}
+
+/* 화면이 작을수록 컨트롤도 작게 — 보드 공간을 지킨다 */
+@media (max-width:600px),(max-height:520px){
+  :root{--pad-size:106px;--jump-size:74px;--ctrl-gap:12px}
+}
+@media (min-width:1100px) and (min-height:760px){
+  :root{--pad-size:150px;--jump-size:104px;--ctrl-gap:26px}
+}
+/* 가로로 아주 납작한 태블릿: 컨트롤을 좌우로 붙이고 보드는 가운데를 쓴다 */
+@media (max-height:480px){
+  :root{--pad-size:96px;--jump-size:68px;--ctrl-gap:10px}
+  #prompt{-webkit-line-clamp:1;font-size:clamp(14px,2.2vw,20px)}
+  .slot{width:34px;height:34px;font-size:18px;border-radius:9px}
+  .hint{display:none}
+}
+
+/* ================= 시작 오버레이 ================= */
+#startOverlay{
+  position:absolute;inset:0;z-index:20;display:grid;place-items:center;padding:20px;
+  background:rgba(10,12,28,.74);backdrop-filter:blur(10px);
+}
+#startOverlay.hidden{display:none}
+.start-card{
+  max-width:440px;width:100%;text-align:center;padding:26px 22px;border-radius:22px;
+  background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.05));
+  border:1px solid rgba(255,255,255,.18);
+}
+.start-emoji{font-size:42px}
+.start-card h2{margin:6px 0 10px;font-size:clamp(20px,4vw,26px)}
+.start-card p{margin:0 0 8px;color:var(--dim);line-height:1.65;font-size:14px}
+.start-card p b{color:var(--ink)}
+.start-card p.small{font-size:12px}
+.start-card p.how{
+  display:flex;flex-direction:column;gap:5px;margin:14px 0 4px;
+  padding:12px;border-radius:14px;background:rgba(0,0,0,.24);text-align:left;font-size:13px;
+}
+.start-card p.how b{color:var(--accent)}
+.start-card p.how span b:first-child{display:inline-block;min-width:16px;color:var(--ink)}
+#btnStart{
+  margin-top:16px;font-family:inherit;font-size:16px;font-weight:800;padding:14px 28px;
+  border:0;border-radius:999px;background:var(--accent);color:#2a2410;cursor:pointer;
+}
+#loadNote{
+  position:absolute;z-index:4;left:50%;transform:translateX(-50%);
+  bottom:calc(4px + var(--sb));font-size:10.5px;color:rgba(244,246,255,.3);
+  pointer-events:none;white-space:nowrap;
+}

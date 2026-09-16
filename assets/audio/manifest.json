@@ -1,0 +1,78 @@
+{
+  "_comment": "step_<재질> 의 files 는 변형 목록이고, 밟을 때마다 다른 변형이 재생됩니다. gain 은 재질끼리 체감 음량을 맞추기 위한 보정값으로, 게임에서 직접 재어 정한 숫자입니다. 여기에 없는 재질(cotton/orbeez/glass/sponge)은 절차적 합성으로 소리를 만듭니다. 자세한 내용은 docs/AUDIO_MAPPING.md 참고.",
+  "basePath": "assets/audio/",
+  "samples": {
+    "step_keycap": {
+      "files": [
+        "keycap_1.wav",
+        "keycap_2.wav",
+        "keycap_3.wav",
+        "keycap_4.wav"
+      ],
+      "gain": 1.125
+    },
+    "step_wood": {
+      "files": [
+        "wood_1.wav",
+        "wood_2.wav",
+        "wood_3.wav",
+        "wood_4.wav"
+      ],
+      "gain": 0.323
+    },
+    "step_jelly": {
+      "files": [
+        "jelly_1.wav",
+        "jelly_2.wav",
+        "jelly_3.wav",
+        "jelly_4.wav"
+      ],
+      "gain": 0.841
+    },
+    "step_bubble": {
+      "files": [
+        "bubble_1.wav",
+        "bubble_2.wav",
+        "bubble_3.wav",
+        "bubble_4.wav"
+      ],
+      "gain": 1.478
+    },
+    "step_slime": {
+      "files": [
+        "slime_1.wav"
+      ],
+      "gain": 0.479
+    },
+    "step_leaf": {
+      "files": [
+        "leaf_1.wav",
+        "leaf_2.wav",
+        "leaf_3.wav",
+        "leaf_4.wav",
+        "leaf_5.wav"
+      ],
+      "gain": 1.8
+    },
+    "step_sand": {
+      "files": [
+        "sand_1.wav",
+        "sand_2.wav",
+        "sand_3.wav",
+        "sand_4.wav",
+        "sand_5.wav"
+      ],
+      "gain": 1.47
+    },
+    "step_snow": {
+      "files": [
+        "snow_1.wav",
+        "snow_2.wav",
+        "snow_3.wav",
+        "snow_4.wav",
+        "snow_5.wav"
+      ],
+      "gain": 0.497
+    }
+  }
+}

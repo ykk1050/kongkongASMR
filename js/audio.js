@@ -1,0 +1,918 @@
+/* =============================================================
+ *  소리 콩콩 — ASMR 오디오 엔진 v2
+ *
+ *  설계 원칙 (v1 대비 달라진 점)
+ *   1) 모달 합성(modal synthesis) — 두드린 물체는 "감쇠하는 공명 모드의 합"이다.
+ *      단일 오실레이터 대신 재질별 비조화 배음비를 가진 3~5개 모드를 쌓는다.
+ *   2) 트랜지언트 / 바디 / 테일 3단 구조 — 어택의 딱 소리, 몸통 공명, 잔향 꼬리를 분리.
+ *   3) 휴머나이즈 — 매번 피치·타이밍·게인을 조금씩 흔들어 기계적 반복을 없앤다.
+ *   4) 그래뉼러 텍스처 — 낙엽·비닐은 수십 개의 미세 알갱이를 좌우로 흩뿌린다.
+ *   5) 근접 마이크 감각 — 잔향은 짧고 어둡게, 저역을 살짝 올리고 리미터로 정리.
+ *
+ *  - PannerNode(HRTF) 기반 바이노럴 정위
+ *  - registerSampleMap()으로 실제 녹음 에셋 교체 가능 (docs/AUDIO_MAPPING.md)
+ * ============================================================= */
+window.SK = window.SK || {};
+
+SK.Audio = (function () {
+  var ctx = null;
+  var preMaster = null, master = null, dryBus = null, wetBus = null, convolver = null;
+  var warmth = null, limiter = null;
+  var noiseBuf = null, samples = Object.create(null), lastVariant = Object.create(null);
+  var sampleGain = Object.create(null);
+  var analyser = null, levelBuf = null, smoothLevel = 0;
+  var muted = false, ready = false;
+
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+
+  /* =========================================================
+   *  초기화 — 마스터 체인
+   *
+   *   voices ─▶ panner ─┬─▶ dryBus ─────────────┐
+   *                     └─▶ send ─▶ wetBus ─▶ convolver ─┤
+   *                                                      ▼
+   *              preMaster ─▶ lowShelf(따뜻함) ─▶ limiter ─▶ master ─▶ 출력
+   * ======================================================= */
+  function init() {
+    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return ctx; }
+    var AC = window.AudioContext || window.webkitAudioContext;
+    ctx = new AC();
+
+    master = ctx.createGain();
+    master.gain.value = 0.95;
+    master.connect(ctx.destination);
+
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.55;
+    levelBuf = new Uint8Array(analyser.fftSize);
+    master.connect(analyser);
+
+    // 여러 소리가 겹쳐도 지저분해지지 않도록 부드럽게 눌러 준다
+    limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -14;
+    limiter.knee.value = 8;
+    limiter.ratio.value = 6;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.16;
+    limiter.connect(master);
+
+    // 근접 마이크 느낌의 저역 보강
+    warmth = ctx.createBiquadFilter();
+    warmth.type = 'lowshelf';
+    warmth.frequency.value = 180;
+    warmth.gain.value = 3.5;
+    warmth.connect(limiter);
+
+    preMaster = ctx.createGain();
+    preMaster.gain.value = 1;
+    preMaster.connect(warmth);
+
+    dryBus = ctx.createGain(); dryBus.gain.value = 1.0; dryBus.connect(preMaster);
+
+    // ASMR은 "가까이서" 들려야 하므로 잔향은 짧고 어둡게
+    convolver = ctx.createConvolver();
+    convolver.buffer = makeImpulse(0.85, 3.4, 4200);
+    wetBus = ctx.createGain(); wetBus.gain.value = 0.16;
+    wetBus.connect(convolver); convolver.connect(preMaster);
+
+    noiseBuf = makeNoise(2.0);
+
+    var L = ctx.listener;
+    if (L.positionX) {
+      L.positionX.value = 0; L.positionY.value = 0; L.positionZ.value = 0;
+      L.forwardX.value = 0; L.forwardY.value = 0; L.forwardZ.value = -1;
+      L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0;
+    } else if (L.setPosition) {
+      L.setPosition(0, 0, 0); L.setOrientation(0, 0, -1, 0, 1, 0);
+    }
+    ready = true;
+    return ctx;
+  }
+
+  function makeNoise(sec) {
+    var n = Math.floor(ctx.sampleRate * sec);
+    var b = ctx.createBuffer(1, n, ctx.sampleRate), d = b.getChannelData(0);
+    for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    return b;
+  }
+
+  /** 초기 반사 + 어두운 꼬리를 가진 작은 방 임펄스 응답 */
+  function makeImpulse(sec, decay, cutoffHint) {
+    var n = Math.floor(ctx.sampleRate * sec);
+    var b = ctx.createBuffer(2, n, ctx.sampleRate);
+    var lp = 0.0;
+    var k = Math.min(0.9, (cutoffHint || 4000) / (ctx.sampleRate / 2));
+    for (var c = 0; c < 2; c++) {
+      var d = b.getChannelData(c);
+      lp = 0;
+      for (var i = 0; i < n; i++) {
+        var t = i / n;
+        var v = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
+        lp += (v - lp) * k;                       // 1극 로우패스로 꼬리를 어둡게
+        d[i] = lp * (i < 300 ? i / 300 : 1);
+      }
+      // 초기 반사 몇 개를 심어 "작은 방" 감각을 만든다
+      var taps = [0.011, 0.019, 0.031, 0.047];
+      for (var e = 0; e < taps.length; e++) {
+        var idx = Math.floor(taps[e] * ctx.sampleRate) + (c ? 37 : 0);
+        if (idx < n) d[idx] += (0.5 - e * 0.1) * (c ? -1 : 1);
+      }
+    }
+    return b;
+  }
+
+  /* =========================================================
+   *  공간화
+   * ======================================================= */
+  function makePanner(pan, depth) {
+    var node;
+    if (ctx.createPanner) {
+      node = ctx.createPanner();
+      node.panningModel = 'HRTF';
+      node.distanceModel = 'inverse';
+      node.refDistance = 1.2;
+      node.maxDistance = 20;
+      node.rolloffFactor = 0.9;
+      var x = (pan || 0) * 3.2;
+      var z = -1.4 - (depth || 0) * 3.0;
+      if (node.positionX) { node.positionX.value = x; node.positionY.value = 0; node.positionZ.value = z; }
+      else node.setPosition(x, 0, z);
+    } else {
+      node = ctx.createStereoPanner();
+      node.pan.value = Math.max(-1, Math.min(1, pan || 0));
+    }
+    return node;
+  }
+
+  function spatial(pan, depth, wetAmount) {
+    var out = ctx.createGain();
+    var node = makePanner(pan, depth);
+    out.connect(node);
+    node.connect(dryBus);
+    var send = ctx.createGain();
+    send.gain.value = (wetAmount == null ? 0.3 : wetAmount);
+    node.connect(send); send.connect(wetBus);
+    return out;
+  }
+
+  /**
+   * 좌·중·우로 살짝 벌린 세 갈래 목적지.
+   * 그래뉼러 텍스처(낙엽, 비닐)를 흩뿌려 머리 주변을 감싸는 느낌을 만든다.
+   */
+  function spatialTrio(pan, depth, wetAmount, spread) {
+    var s = spread == null ? 0.28 : spread;
+    return [
+      spatial(Math.max(-1, pan - s), depth, wetAmount),
+      spatial(pan, depth, wetAmount),
+      spatial(Math.min(1, pan + s), depth, wetAmount)
+    ];
+  }
+
+  /* =========================================================
+   *  보이스 프리미티브
+   * ======================================================= */
+
+  /** 노이즈 한 조각 — 트랜지언트·마찰·바람 */
+  function noiseVoice(o) {
+    var t0 = o.t || ctx.currentTime;
+    var dur = o.dur || 0.08;
+    var src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    src.loop = true;
+    // 버퍼 위치를 매번 바꿔 같은 파형이 반복되지 않게 한다
+    var offset = Math.random() * (noiseBuf.duration - dur - 0.05);
+    src.playbackRate.value = o.rate || 1;
+
+    var f = ctx.createBiquadFilter();
+    f.type = o.filter || 'bandpass';
+    f.frequency.setValueAtTime(Math.max(40, o.freq || 1500), t0);
+    if (o.freqEnd) f.frequency.exponentialRampToValueAtTime(Math.max(40, o.freqEnd), t0 + dur);
+    f.Q.value = (o.q == null ? 1 : o.q);
+
+    var g = ctx.createGain();
+    var a = (o.attack == null ? 0.0015 : o.attack);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, o.gain || 0.2), t0 + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+    src.connect(f); f.connect(g); g.connect(o.dest);
+    src.start(t0, Math.max(0, offset));
+    src.stop(t0 + dur + 0.05);
+  }
+
+  /** 단순 톤 — 스윕·서브베이스 */
+  function toneVoice(o) {
+    var t0 = o.t || ctx.currentTime;
+    var dur = o.dur || 0.12;
+    var osc = ctx.createOscillator();
+    osc.type = o.type || 'sine';
+    osc.frequency.setValueAtTime(o.freq, t0);
+    if (o.freqEnd) osc.frequency.exponentialRampToValueAtTime(Math.max(20, o.freqEnd), t0 + dur);
+
+    var g = ctx.createGain();
+    var a = (o.attack == null ? 0.003 : o.attack);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, o.gain || 0.2), t0 + a);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+    var last = g;
+    if (o.lp) {
+      var lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = o.lp;
+      g.connect(lp); last = lp;
+    }
+    osc.connect(g); last.connect(o.dest);
+    osc.start(t0); osc.stop(t0 + dur + 0.05);
+  }
+
+  /**
+   * 모달 합성 — 두드린 물체의 공명.
+   * 각 모드는 고유 주파수비 f, 감쇠시간 d, 세기 g 를 가진다.
+   * 주의: 모드에 LFO 비브라토를 걸면 곧바로 전자음처럼 들린다.
+   * 말랑한 재질의 '출렁임'은 비브라토가 아니라 toneVoice 의 피치 글라이드로 만든다.
+   * @param {object} o {dest, t, base, modes:[{f,d,g}], gain, rate, jitter}
+   */
+  function modalVoice(o) {
+    var t0 = o.t || ctx.currentTime;
+    var rate = o.rate || 1;
+    var jit = o.jitter == null ? 0.012 : o.jitter;
+    var modes = o.modes;
+
+    for (var i = 0; i < modes.length; i++) {
+      var m = modes[i];
+      var f = o.base * m.f * rate * (1 + rnd(-jit, jit));
+      if (f < 18 || f > 18000) continue;
+
+      var osc = ctx.createOscillator();
+      osc.type = m.type || 'sine';
+      osc.frequency.setValueAtTime(f, t0);
+
+      var g = ctx.createGain();
+      var peak = Math.max(0.0002, (o.gain || 0.2) * m.g);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(peak, t0 + (m.a || 0.0012));
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + m.d);
+
+      osc.connect(g); g.connect(o.dest);
+      osc.start(t0); osc.stop(t0 + m.d + 0.05);
+    }
+  }
+
+  /**
+   * 그래뉼러 텍스처 — 수십 개의 미세한 알갱이를 시간·주파수·좌우로 흩뿌린다.
+   * 낙엽 바스락, 비닐 구김 같은 "결"이 있는 소리에 쓴다.
+   * @param {object} o {dests:[], t, count, span, freq:[lo,hi], q, gain, grain:[lo,hi], decay}
+   */
+  function granular(o) {
+    var t0 = o.t || ctx.currentTime;
+    for (var i = 0; i < o.count; i++) {
+      var p = i / o.count;
+      // 앞쪽에 알갱이가 몰리고 뒤로 갈수록 성기게 — 실제 부스러지는 소리의 분포
+      var at = t0 + Math.pow(Math.random(), 0.65) * o.span;
+      var density = Math.pow(1 - p, o.decay == null ? 1.1 : o.decay);
+      noiseVoice({
+        dest: o.dests[i % o.dests.length],
+        t: at,
+        filter: 'bandpass',
+        freq: rnd(o.freq[0], o.freq[1]),
+        q: o.q == null ? 3.5 : rnd(o.q * 0.6, o.q * 1.6),
+        gain: o.gain * rnd(0.35, 1.15) * (0.4 + density * 0.6),
+        dur: rnd(o.grain[0], o.grain[1]),
+        attack: 0.0008
+      });
+    }
+  }
+
+  /**
+   * 삐걱/뽀득 — 고무·스펀지·눈을 누를 때 나는 공명 처프.
+   * 좁은 대역이 위로 쓸려 올라가며 여러 번 끊기는 것이 특징이다.
+   * @param {object} o {dest, t, base, rise, gain, count, span, q}
+   */
+  function squeak(o) {
+    var t0 = o.t || ctx.currentTime;
+    var n = o.count || 5;
+    for (var i = 0; i < n; i++) {
+      var p = i / Math.max(1, n - 1);
+      var f = o.base * (1 + p * (o.rise == null ? 1.1 : o.rise)) * rnd(0.94, 1.06);
+      noiseVoice({
+        dest: o.dest,
+        t: t0 + p * (o.span || 0.13) + rnd(0, 0.008),
+        filter: 'bandpass', freq: f, freqEnd: f * rnd(1.05, 1.3),
+        q: o.q == null ? 16 : o.q,
+        gain: o.gain * (0.55 + Math.sin(p * Math.PI) * 0.65),
+        dur: rnd(0.02, 0.045), attack: 0.004
+      });
+    }
+  }
+
+  /* =========================================================
+   *  재질별 레시피
+   *  d: 목적지(단일), D: 좌·중·우 목적지 배열
+   *  i: 강도 0~1, r: 피치 배율, t: 시작 시각
+   * ======================================================= */
+  // 주의: 각 레시피의 g(기본 게인)는 재질 간 '체감 음량'이 같아지도록 맞춰 놓았다.
+  // 저역이 풍부한 재질(솜·젤리·나무)은 작게, 고역 그래뉼러(낙엽·에어캡)는 크게 잡는다.
+  var MATERIAL = {
+
+    /* 기계식 키캡 — 딸깍 + 8ms 뒤 바닥 침. 전체 60ms 이하의 짧은 소리 */
+    keycap: function (d, D, i, r, t) {
+      var g = 0.145 + 0.190 * i;
+      // 1) 스템이 걸리는 순간 (1~4ms, 이게 '딸깍'의 정체)
+      noiseVoice({ dest: d, t: t, filter: 'highpass', freq: 3800, gain: g * 0.55, dur: 0.004, attack: 0.0004 });
+      noiseVoice({ dest: d, t: t + 0.001, filter: 'bandpass', freq: 2600 * r, q: 1.4, gain: g * 0.45, dur: 0.009 });
+
+      // 2) 키캡이 바닥을 치는 'thock' — 강하게 감쇠해 음정이 들리지 않는다
+      var bt = t + 0.008;
+      noiseVoice({ dest: d, t: bt, filter: 'bandpass', freq: 1150 * r, q: 1.5, gain: g * 0.9, dur: 0.02, attack: 0.0006 });
+      modalVoice({
+        dest: d, t: bt, base: 205 * r, gain: g * 0.75, jitter: 0.02,
+        modes: [
+          { f: 1.00, d: 0.038, g: 1.00 },
+          { f: 1.93, d: 0.022, g: 0.40 },
+          { f: 3.41, d: 0.013, g: 0.16 }
+        ]
+      });
+      // 3) 책상으로 전해지는 저역 (30ms만)
+      toneVoice({ dest: d, t: bt, freq: 112 * r, freqEnd: 80 * r, type: 'sine', gain: g * 0.5, dur: 0.035, lp: 240 });
+    },
+
+    /* 솜·쿠션 — 공기가 눌려 나가는 소리. 어택이 없고 아주 부드럽다 */
+    cotton: function (d, D, i, r, t) {
+      var g = 0.050 + 0.062 * i;
+      // 1) 눌리는 공기
+      noiseVoice({
+        dest: d, t: t, filter: 'lowpass', freq: 620 * r, freqEnd: 240 * r,
+        q: 0.5, gain: g, dur: 0.20, attack: 0.022
+      });
+      // 2) 아주 낮고 둔한 몸통
+      modalVoice({
+        dest: d, t: t, base: 76 * r, gain: g * 0.9, jitter: 0.03,
+        modes: [
+          { f: 1.00, d: 0.24, g: 1.00, a: 0.014 },
+          { f: 1.73, d: 0.14, g: 0.30, a: 0.012 }
+        ]
+      });
+      // 3) 천 결이 스치는 미세한 결
+      granular({
+        dests: D, t: t + 0.01, count: 9, span: 0.14,
+        freq: [3200, 7800], q: 2.0, gain: g * 0.10, grain: [0.006, 0.018], decay: 1.4
+      });
+    },
+
+    /* 젤리 — 눌리며 피치가 떨어지는 bloop. 비브라토(LFO)는 전자음이 되므로 쓰지 않는다 */
+    jelly: function (d, D, i, r, t) {
+      var g = 0.048 + 0.062 * i;
+      // 1) 말랑한 표면에 닿는 소리 — 아주 부드럽게
+      noiseVoice({
+        dest: d, t: t, filter: 'lowpass', freq: 1600 * r, freqEnd: 420 * r,
+        q: 0.8, gain: g * 0.4, dur: 0.055, attack: 0.004
+      });
+      // 2) 눌리며 내려가는 본체 — 피치 글라이드가 '젤리다움'의 핵심
+      toneVoice({ dest: d, t: t, freq: 300 * r, freqEnd: 98 * r, type: 'sine', gain: g, dur: 0.16, attack: 0.004, lp: 760 });
+      toneVoice({ dest: d, t: t, freq: 148 * r, freqEnd: 64 * r, type: 'sine', gain: g * 0.55, dur: 0.2, lp: 320 });
+      // 3) 탄성으로 살짝 되돌아온다
+      toneVoice({ dest: d, t: t + 0.11, freq: 116 * r, freqEnd: 168 * r, type: 'sine', gain: g * 0.28, dur: 0.14, lp: 480 });
+    },
+
+    /* 마른 낙엽 — 순수 그래뉼러. 수십 개의 알갱이가 좌우로 흩어진다 */
+    leaf: function (d, D, i, r, t) {
+      var g = 0.19 + 0.25 * i;
+      granular({
+        dests: D, t: t, count: 26, span: 0.22,
+        freq: [2400 * r, 9500 * r], q: 4.5, gain: g, grain: [0.005, 0.022], decay: 1.25
+      });
+      // 잎이 눌리며 나는 낮은 으스러짐
+      noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 900 * r, q: 0.7, gain: g * 0.5, dur: 0.09, attack: 0.004 });
+      modalVoice({
+        dest: d, t: t, base: 190 * r, gain: g * 0.35, jitter: 0.05,
+        modes: [{ f: 1.00, d: 0.07, g: 1.0 }, { f: 2.4, d: 0.04, g: 0.4 }]
+      });
+    },
+
+    /* 에어캡 — 공명 필터가 순간적으로 울리는 진짜 '뽁' + 비닐 구김 */
+    bubble: function (d, D, i, r, t) {
+      var g = 0.22 + 0.26 * i;
+      // 1) 팝: 좁은 대역이 순간적으로 링잉하며 위로 쓸려 올라간다
+      noiseVoice({
+        dest: d, t: t, filter: 'bandpass',
+        freq: 620 * r, freqEnd: 3100 * r, q: 14, gain: g, dur: 0.022, attack: 0.0005
+      });
+      toneVoice({ dest: d, t: t, freq: 520 * r, freqEnd: 3400 * r, type: 'sine', gain: g * 0.6, dur: 0.016, attack: 0.0006 });
+      // 2) 터진 뒤의 짧은 몸통
+      modalVoice({
+        dest: d, t: t + 0.004, base: 340 * r, gain: g * 0.4,
+        modes: [{ f: 1.00, d: 0.05, g: 1.0 }, { f: 2.16, d: 0.03, g: 0.3 }]
+      });
+      // 3) 비닐이 구겨지는 결
+      granular({
+        dests: D, t: t + 0.012, count: 11, span: 0.1,
+        freq: [4200, 11000], q: 3.0, gain: g * 0.16, grain: [0.003, 0.012], decay: 1.5
+      });
+    },
+
+    /* 나무 — 마루판을 밟는 둔탁한 소리. 길게 울리면 목탁이 되므로 90ms 안에 끝낸다 */
+    wood: function (d, D, i, r, t) {
+      var g = 0.060 + 0.078 * i;
+      noiseVoice({ dest: d, t: t, filter: 'bandpass', freq: 1700 * r, q: 1.0, gain: g * 0.7, dur: 0.012, attack: 0.0006 });
+      modalVoice({
+        dest: d, t: t, base: 132 * r, gain: g, jitter: 0.03,
+        modes: [
+          { f: 1.00, d: 0.082, g: 1.00 },
+          { f: 2.14, d: 0.046, g: 0.34 },
+          { f: 3.87, d: 0.024, g: 0.12 }
+        ]
+      });
+      // 판이 함께 울리는 바람 소리
+      noiseVoice({ dest: d, t: t + 0.004, filter: 'lowpass', freq: 640 * r, q: 0.6, gain: g * 0.45, dur: 0.055, attack: 0.003 });
+    },
+
+    /* 슬라임 — 공명 로우패스가 열렸다 닫히며 나는 젖은 스퀄치.
+       모달 비브라토는 전자음이 되므로 쓰지 않는다 */
+    slime: function (d, D, i, r, t) {
+      var g = 0.068 + 0.090 * i;
+      // 1) 눌리며 수분이 밀려나간다 — 공명점이 위로 열린다
+      noiseVoice({
+        dest: d, t: t, filter: 'lowpass', freq: 320 * r, freqEnd: 2400 * r,
+        q: 6, gain: g, dur: 0.085, attack: 0.014
+      });
+      // 2) 떼면서 다시 닫힌다 — 이 왕복이 '찌걱'을 만든다
+      noiseVoice({
+        dest: d, t: t + 0.075, filter: 'lowpass', freq: 2200 * r, freqEnd: 380 * r,
+        q: 5, gain: g * 0.8, dur: 0.13, attack: 0.022
+      });
+      // 3) 끈적하게 가라앉는 저역
+      toneVoice({ dest: d, t: t, freq: 145 * r, freqEnd: 68 * r, type: 'sine', gain: g * 0.5, dur: 0.17, lp: 300 });
+      // 4) 젖은 기포가 드문드문 터진다
+      granular({
+        dests: D, t: t + 0.03, count: 7, span: 0.15,
+        freq: [800, 2800], q: 7, gain: g * 0.25, grain: [0.005, 0.018], decay: 1.3
+      });
+    },
+
+    /* 워터비즈(구슬볼) — 말랑한 구슬 여러 알이 굴러가며 톡톡 터진다 */
+    orbeez: function (d, D, i, r, t) {
+      var g = 0.13 + 0.17 * i;
+      // 1) 구슬 알들이 서로 부딪히는 소리
+      var n = 5 + Math.round(i * 4);
+      for (var k = 0; k < n; k++) {
+        var at = t + Math.pow(Math.random(), 0.7) * 0.18;
+        modalVoice({
+          dest: D[k % 3], t: at, base: rnd(420, 980) * r, gain: g * rnd(0.4, 1),
+          jitter: 0.03,
+          modes: [{ f: 1.00, d: rnd(0.05, 0.11), g: 1.0 }, { f: 2.3, d: 0.03, g: 0.25 }]
+        });
+      }
+      // 2) 한두 알이 터지는 젖은 팝
+      for (var p = 0; p < 2; p++) {
+        noiseVoice({
+          dest: D[p % 3], t: t + rnd(0, 0.1), filter: 'bandpass',
+          freq: rnd(700, 1200) * r, freqEnd: rnd(2200, 3200) * r, q: 11,
+          gain: g * 0.55, dur: 0.02, attack: 0.0006
+        });
+      }
+      // 3) 물기 있는 바닥
+      noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 700 * r, gain: g * 0.35, dur: 0.1, attack: 0.008 });
+    },
+
+    /* 모래 — 사각사각. 알갱이를 따로따로 찍으면 지직거리므로,
+       넓은 대역의 연속 노이즈를 바닥에 깔고 굵은 알갱이만 몇 개 얹는다 */
+    sand: function (d, D, i, r, t) {
+      var g = 0.30 + 0.39 * i;
+      // 1) 연속적인 'shhh' — 위쪽이 서서히 닫히며 사그라든다
+      noiseVoice({
+        dest: d, t: t, filter: 'bandpass', freq: 3400 * r, freqEnd: 1500 * r,
+        q: 0.5, gain: g, dur: 0.17, attack: 0.009
+      });
+      noiseVoice({
+        dest: d, t: t + 0.01, filter: 'highpass', freq: 2600 * r,
+        gain: g * 0.45, dur: 0.13, attack: 0.014
+      });
+      // 2) 발밑에서 다져지는 저역
+      noiseVoice({
+        dest: d, t: t, filter: 'lowpass', freq: 460 * r, q: 0.6,
+        gain: g * 0.5, dur: 0.11, attack: 0.01
+      });
+      // 3) 드문드문 섞이는 굵은 알갱이
+      granular({
+        dests: D, t: t, count: 9, span: 0.13,
+        freq: [2200 * r, 6800 * r], q: 2.4, gain: g * 0.3, grain: [0.004, 0.013], decay: 1.2
+      });
+    },
+
+    /* 유리구슬 — 길게 남는 맑은 링. 배음이 높고 감쇠가 느리다 */
+    glass: function (d, D, i, r, t) {
+      var g = 0.104 + 0.133 * i;
+      noiseVoice({ dest: d, t: t, filter: 'highpass', freq: 7000, gain: g * 0.9, dur: 0.005, attack: 0.0005 });
+      modalVoice({
+        dest: d, t: t, base: 880 * r, gain: g, jitter: 0.006,
+        modes: [
+          { f: 1.00, d: 0.95, g: 1.00 },
+          { f: 2.45, d: 0.62, g: 0.36 },
+          { f: 4.11, d: 0.34, g: 0.18 },
+          { f: 6.83, d: 0.18, g: 0.08 }
+        ]
+      });
+      // 옆 구슬들이 따라 울린다
+      for (var k = 0; k < 2; k++) {
+        modalVoice({
+          dest: D[k * 2], t: t + rnd(0.01, 0.06), base: 880 * r * rnd(1.18, 1.62),
+          gain: g * 0.4, jitter: 0.006,
+          modes: [{ f: 1.00, d: rnd(0.4, 0.8), g: 1.0 }, { f: 2.45, d: 0.3, g: 0.3 }]
+        });
+      }
+    },
+
+    /* 눈 — 뽀득. 좁은 Q로 처프를 만들면 휘파람이 되므로,
+       넓은 대역이 빠르게 끊기며 밀려 올라가게 만든다 */
+    snow: function (d, D, i, r, t) {
+      var g = 0.42 + 0.55 * i;
+      // 1) 발밑에서 눈이 다져진다
+      noiseVoice({
+        dest: d, t: t, filter: 'lowpass', freq: 760 * r, freqEnd: 300 * r,
+        q: 0.7, gain: g * 0.9, dur: 0.15, attack: 0.012
+      });
+      // 2) 뽀-득 — Q 4.5의 넓은 크리크가 9번 끊기며 올라간다
+      squeak({ dest: d, t: t + 0.015, base: 700 * r, rise: 0.8, gain: g * 0.75, count: 9, span: 0.17, q: 4.5 });
+      // 3) 눈 알갱이
+      granular({
+        dests: D, t: t, count: 16, span: 0.15,
+        freq: [1100 * r, 4000 * r], q: 1.8, gain: g * 0.4, grain: [0.006, 0.022], decay: 1.3
+      });
+    },
+
+    /* 스펀지 — 공기를 머금었다 내뱉는 뽀드득 */
+    sponge: function (d, D, i, r, t) {
+      var g = 0.076 + 0.10 * i;
+      squeak({ dest: d, t: t + 0.01, base: 900 * r, rise: 1.4, gain: g, count: 5, span: 0.12, q: 20 });
+      noiseVoice({
+        dest: d, t: t, filter: 'lowpass', freq: 900 * r, freqEnd: 320 * r,
+        q: 0.7, gain: g * 0.8, dur: 0.15, attack: 0.018
+      });
+      modalVoice({
+        dest: d, t: t, base: 92 * r, gain: g * 0.7, jitter: 0.03,
+        modes: [{ f: 1.00, d: 0.2, g: 1.0, a: 0.012 }, { f: 1.9, d: 0.11, g: 0.25 }]
+      });
+    }
+  };
+
+  /* =========================================================
+   *  공개 API — 발소리 / 착지음
+   * ======================================================= */
+
+  /**
+   * @param {string} mat 재질 키
+   * @param {object} o   {intensity:0~1, pan:-1~1, depth:0~1, stomp:boolean}
+   */
+  function step(mat, o) {
+    if (!ready || muted) return;
+    o = o || {};
+    var i = Math.max(0, Math.min(1, (o.intensity == null ? 0.5 : o.intensity)));
+    var stomp = !!o.stomp;
+    if (stomp) i = Math.min(1, i * 1.3 + 0.25);
+
+    // 휴머나이즈 — 매번 피치가 아주 조금 달라진다
+    var rate = (0.9 + i * 0.3) * (stomp ? 0.84 : 1) * rnd(0.97, 1.03);
+    var pan = o.pan || 0, depth = o.depth || 0;
+    var d = spatial(pan, depth, stomp ? 0.42 : 0.26);
+    var D = spatialTrio(pan, depth, stomp ? 0.42 : 0.26, 0.3);
+    var t = ctx.currentTime + 0.001;
+
+    var key = 'step_' + mat + (stomp ? '_stomp' : '');
+    if (!samples[key] && stomp) key = 'step_' + mat;
+    if (samples[key]) {
+      playSample(key, d, t, rate, (0.55 + 0.45 * i) * (stomp ? 1.25 : 1));
+      if (stomp) toneVoice({ dest: d, t: t, freq: 72, freqEnd: 40, type: 'sine', gain: 0.2, dur: 0.26, lp: 260 });
+      return;
+    }
+
+    (MATERIAL[mat] || MATERIAL.wood)(d, D, i, rate, t);
+
+    if (stomp) {
+      // 강하게 내려찍을 때의 저역 임팩트
+      toneVoice({ dest: d, t: t, freq: 72, freqEnd: 40, type: 'sine', gain: 0.2, dur: 0.26, lp: 260 });
+      noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 380, gain: 0.1, dur: 0.15, attack: 0.004 });
+    }
+  }
+
+  /** 도약할 때의 짧은 휘익 소리 */
+  function whoosh(power, pan) {
+    if (!ready || muted) return;
+    var d = spatial(pan || 0, 0.25, 0.18);
+    var t = ctx.currentTime + 0.001;
+    var big = power > 1;
+    if (samples['hop_whoosh']) { playSample('hop_whoosh', d, t, big ? 0.82 : 1, big ? 1 : 0.7); return; }
+    noiseVoice({
+      dest: d, t: t, filter: 'bandpass',
+      freq: big ? 640 : 1000, freqEnd: big ? 2100 : 2900, q: 1.1,
+      gain: big ? 0.07 : 0.042, dur: big ? 0.24 : 0.16, attack: 0.055
+    });
+    // 옷깃이 스치는 미세한 결
+    noiseVoice({ dest: d, t: t + 0.02, filter: 'highpass', freq: 7000, gain: 0.018, dur: 0.1, attack: 0.03 });
+  }
+
+  /* =========================================================
+   *  파괴 단계음
+   * ======================================================= */
+
+  /**
+   * 소모성 타일에 금이 갈 때. 단계가 올라갈수록 밝고 날카로워진다.
+   * @param {string} mat 재질  @param {number} stage 1..total  @param {number} total
+   */
+  function crack(mat, stage, total, o) {
+    if (!ready || muted) return;
+    o = o || {};
+    var pan = o.pan || 0, depth = o.depth || 0;
+    var d = spatial(pan, depth, 0.3);
+    var D = spatialTrio(pan, depth, 0.3, 0.34);
+    var t = ctx.currentTime + 0.001;
+    var prog = total ? stage / total : 1;
+    var rate = (0.94 + prog * 0.45) * rnd(0.97, 1.03);
+
+    var key = 'crack_' + mat;
+    if (samples[key]) { playSample(key, d, t, rate, 0.6 + prog * 0.4); return; }
+
+    if (mat === 'bubble') {
+      // 알이 하나씩 터진다 — 단계가 올라갈수록 더 높고 짧게
+      noiseVoice({
+        dest: d, t: t, filter: 'bandpass',
+        freq: 600 * rate, freqEnd: 3000 * rate, q: 15, gain: 0.15, dur: 0.02, attack: 0.0005
+      });
+      toneVoice({ dest: d, t: t, freq: 480 * rate, freqEnd: 3200 * rate, type: 'sine', gain: 0.08, dur: 0.014, attack: 0.0006 });
+      granular({ dests: D, t: t + 0.01, count: 7, span: 0.08, freq: [4500, 11500], q: 3, gain: 0.05, grain: [0.003, 0.01] });
+    } else {
+      // 마른 것이 갈라진다 — 균열이 번지는 그래뉼러
+      granular({
+        dests: D, t: t, count: 14 + Math.round(prog * 10), span: 0.16,
+        freq: [2200 * rate, 9000 * rate], q: 5, gain: 0.19 + prog * 0.11,
+        grain: [0.004, 0.018], decay: 1.0
+      });
+      modalVoice({
+        dest: d, t: t, base: 170 * rate, gain: 0.1, jitter: 0.06,
+        modes: [{ f: 1.0, d: 0.06, g: 1.0 }, { f: 2.7, d: 0.035, g: 0.4 }]
+      });
+    }
+  }
+
+  /** 완전히 부서질 때 */
+  function shatter(mat, o) {
+    if (!ready || muted) return;
+    o = o || {};
+    var pan = o.pan || 0, depth = o.depth || 0;
+    var d = spatial(pan, depth, 0.45);
+    var D = spatialTrio(pan, depth, 0.45, 0.42);
+    var t = ctx.currentTime + 0.001;
+
+    var key = 'shatter_' + mat;
+    if (samples[key]) { playSample(key, d, t, 1, 1); return; }
+
+    (MATERIAL[mat] || MATERIAL.wood)(d, D, 1, 1.05, t);
+
+    if (mat === 'bubble') {
+      // 남은 알들이 연쇄로 터진다
+      for (var k = 0; k < 6; k++) {
+        var pt = t + 0.01 + Math.random() * 0.22;
+        noiseVoice({
+          dest: D[k % 3], t: pt, filter: 'bandpass',
+          freq: rnd(550, 900), freqEnd: rnd(2600, 3600), q: 13, gain: 0.1, dur: 0.02, attack: 0.0005
+        });
+      }
+    }
+    granular({
+      dests: D, t: t + 0.005, count: 30, span: 0.34,
+      freq: [2000, 11000], q: 4, gain: 0.055, grain: [0.004, 0.024], decay: 1.4
+    });
+    toneVoice({ dest: d, t: t, freq: 108, freqEnd: 62, type: 'sine', gain: 0.09, dur: 0.2, lp: 300 });
+  }
+
+  /** 이미 부서진 자리를 밟았을 때의 공허한 울림 */
+  function hollow(o) {
+    if (!ready || muted) return;
+    o = o || {};
+    var d = spatial(o.pan || 0, 0.3, 0.5);
+    var t = ctx.currentTime + 0.001;
+    noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 320, gain: 0.05, dur: 0.13, attack: 0.01 });
+    modalVoice({
+      dest: d, t: t, base: 84, gain: 0.05,
+      modes: [{ f: 1.0, d: 0.22, g: 1.0, a: 0.008 }, { f: 1.9, d: 0.12, g: 0.25 }]
+    });
+  }
+
+  /* =========================================================
+   *  퀴즈 피드백
+   * ======================================================= */
+
+  var PENTA = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51];
+
+  /** 한 글자 정답 — 맑은 크리스털 '팅' */
+  function stepCorrect(index, o) {
+    if (!ready || muted) return;
+    o = o || {};
+    var pan = o.pan || 0;
+    var d = spatial(pan, 0, 0.5);
+    var D = spatialTrio(pan, 0, 0.5, 0.22);
+    var t = ctx.currentTime + 0.001;
+    if (samples['quiz_step']) { playSample('quiz_step', d, t, Math.pow(1.0595, index * 2), 1); return; }
+
+    var f = PENTA[Math.min(index, PENTA.length - 1)];
+    // 말렛이 닿는 순간
+    noiseVoice({ dest: d, t: t, filter: 'bandpass', freq: f * 5, q: 2.2, gain: 0.05, dur: 0.008, attack: 0.0006 });
+    // 유리 종 — 길게 남는 비조화 모드
+    modalVoice({
+      dest: d, t: t, base: f, gain: 0.2, jitter: 0.004,
+      modes: [
+        { f: 1.00, d: 0.75, g: 1.00 },
+        { f: 2.76, d: 0.42, g: 0.28 },
+        { f: 5.40, d: 0.22, g: 0.12 },
+        { f: 8.93, d: 0.12, g: 0.05 }
+      ]
+    });
+    // 반짝이는 스파클
+    granular({
+      dests: D, t: t + 0.005, count: 8, span: 0.18,
+      freq: [f * 6, f * 14], q: 6, gain: 0.022, grain: [0.004, 0.014], decay: 1.6
+    });
+  }
+
+  /** 문제 완성 — 가장 청량한 ASMR 폭발 */
+  function solveBurst(o) {
+    if (!ready || muted) return;
+    o = o || {};
+    var pan = o.pan || 0;
+    var d = spatial(pan, 0, 0.7);
+    var D = spatialTrio(pan, 0, 0.7, 0.45);
+    var t = ctx.currentTime + 0.001;
+    if (samples['quiz_solve']) { playSample('quiz_solve', d, t, 1, 1); return; }
+
+    // 1) 상승하는 종 아르페지오
+    var arp = [523.25, 659.25, 783.99, 1046.5, 1318.51];
+    for (var k = 0; k < arp.length; k++) {
+      modalVoice({
+        dest: d, t: t + k * 0.058, base: arp[k], gain: 0.13, jitter: 0.004,
+        modes: [
+          { f: 1.00, d: 0.9 - k * 0.08, g: 1.00 },
+          { f: 2.76, d: 0.4, g: 0.24 },
+          { f: 5.40, d: 0.2, g: 0.10 }
+        ]
+      });
+    }
+    // 2) 뽁뽁이 연쇄 팝
+    for (var p = 0; p < 12; p++) {
+      var pt = t + 0.02 + Math.random() * 0.5;
+      noiseVoice({
+        dest: D[p % 3], t: pt, filter: 'bandpass',
+        freq: rnd(560, 1100), freqEnd: rnd(2600, 3800), q: 13,
+        gain: 0.06, dur: 0.02, attack: 0.0005
+      });
+    }
+    // 3) 머리 주변을 감싸는 반짝임
+    granular({
+      dests: D, t: t + 0.04, count: 34, span: 0.65,
+      freq: [5000, 14000], q: 5, gain: 0.025, grain: [0.004, 0.02], decay: 0.8
+    });
+    // 4) 따뜻한 저역 스웰
+    toneVoice({ dest: d, t: t, freq: 130.81, type: 'sine', gain: 0.08, dur: 0.9, attack: 0.05, lp: 400 });
+  }
+
+  /** 오답 — 둔탁하지만 불쾌하지 않게 */
+  function wrong(o) {
+    if (!ready || muted) return;
+    o = o || {};
+    var d = spatial(o.pan || 0, 0.2, 0.12);
+    var t = ctx.currentTime + 0.001;
+    if (samples['quiz_wrong']) { playSample('quiz_wrong', d, t, 1, 1); return; }
+
+    noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 420, gain: 0.085, dur: 0.16, attack: 0.006 });
+    modalVoice({
+      dest: d, t: t, base: 98, gain: 0.13, jitter: 0.02,
+      modes: [
+        { f: 1.00, d: 0.3, g: 1.00, a: 0.004 },
+        { f: 1.41, d: 0.18, g: 0.32 },
+        { f: 2.13, d: 0.09, g: 0.12 }
+      ]
+    });
+    toneVoice({ dest: d, t: t + 0.03, freq: 92, freqEnd: 58, type: 'sine', gain: 0.07, dur: 0.28, lp: 220 });
+  }
+
+  /** 새 문제 등장 */
+  function newQuiz() {
+    if (!ready || muted) return;
+    var d = spatial(0, 0.3, 0.5), t = ctx.currentTime + 0.001;
+    modalVoice({
+      dest: d, t: t, base: 880, gain: 0.09,
+      modes: [{ f: 1.0, d: 0.5, g: 1.0 }, { f: 2.76, d: 0.25, g: 0.2 }]
+    });
+    modalVoice({
+      dest: d, t: t + 0.1, base: 1318.51, gain: 0.08,
+      modes: [{ f: 1.0, d: 0.6, g: 1.0 }, { f: 2.76, d: 0.3, g: 0.2 }]
+    });
+  }
+
+  /** UI 클릭 */
+  function ui() {
+    if (!ready || muted) return;
+    var d = spatial(0, 0.4, 0.1), t = ctx.currentTime + 0.001;
+    noiseVoice({ dest: d, t: t, filter: 'bandpass', freq: 2800, q: 2.5, gain: 0.06, dur: 0.02, attack: 0.0008 });
+    modalVoice({ dest: d, t: t, base: 620, gain: 0.05, modes: [{ f: 1.0, d: 0.06, g: 1.0 }] });
+  }
+
+  /* =========================================================
+   *  샘플 에셋 오버라이드
+   * ======================================================= */
+  /** 같은 변형이 연달아 나오지 않게 고른다 — 반복되면 곧바로 '녹음 재생'처럼 들린다 */
+  function pickVariant(key) {
+    var list = samples[key];
+    if (list.length === 1) return list[0];
+    var i = Math.floor(Math.random() * list.length);
+    if (i === lastVariant[key]) i = (i + 1 + Math.floor(Math.random() * (list.length - 1))) % list.length;
+    lastVariant[key] = i;
+    return list[i];
+  }
+
+  function playSample(key, dest, t, rate, gain) {
+    var src = ctx.createBufferSource();
+    src.buffer = pickVariant(key);
+    src.playbackRate.value = rate || 1;
+    var g = ctx.createGain();
+    g.gain.value = (gain == null ? 1 : gain) * (sampleGain[key] || 1);
+    src.connect(g); g.connect(dest);
+    src.start(t);
+  }
+
+  /**
+   * 실제 녹음 에셋으로 절차적 사운드를 대체한다.
+   * 값에 배열을 주면 그 키의 '변형'이 되어 재생할 때마다 번갈아 쓰인다.
+   * { files: [...], gain: 1.4 } 형태로 주면 그 키에만 게인을 더 건다 —
+   * 녹음마다 체감 음량이 달라서 재질끼리 맞추려면 이 보정이 필요하다.
+   * @param {Object} map { "step_keycap": ["a.wav", "b.wav"], "step_wood": { files: "w.wav", gain: 0.5 } }
+   * @returns {Promise<string[]>} 로드에 성공한 키 목록
+   */
+  function registerSampleMap(map) {
+    if (!ctx) init();
+    var keys = Object.keys(map || {});
+    return Promise.all(keys.map(function (k) {
+      var v = map[k];
+      if (v && v.files) { sampleGain[k] = v.gain == null ? 1 : v.gain; v = v.files; }
+      var urls = [].concat(v);
+      return Promise.all(urls.map(function (u) {
+        return fetch(u)
+          .then(function (r) { if (!r.ok) throw new Error('404'); return r.arrayBuffer(); })
+          .then(function (ab) { return ctx.decodeAudioData(ab); })
+          .catch(function () { return null; });
+      })).then(function (bufs) {
+        bufs = bufs.filter(Boolean);
+        if (!bufs.length) return null;
+        samples[k] = bufs;
+        return k + (bufs.length > 1 ? '×' + bufs.length : '');
+      });
+    })).then(function (r) { return r.filter(Boolean); });
+  }
+
+  /** 현재 출력 레벨(0~1) — 캐릭터 오라·타일 발광 등 시각 효과를 소리에 묶는다 */
+  function getLevel() {
+    if (!analyser || muted) { smoothLevel *= 0.85; return smoothLevel; }
+    analyser.getByteTimeDomainData(levelBuf);
+    var sum = 0;
+    for (var i = 0; i < levelBuf.length; i += 2) {
+      var v = (levelBuf[i] - 128) / 128;
+      sum += v * v;
+    }
+    var rms = Math.sqrt(sum / (levelBuf.length / 2));
+    var lv = Math.min(1, rms * 4.5);
+    smoothLevel = lv > smoothLevel ? lv : smoothLevel * 0.88 + lv * 0.12;
+    return smoothLevel;
+  }
+
+  function setMuted(m) {
+    muted = m;
+    if (master) master.gain.setTargetAtTime(m ? 0 : 0.95, ctx.currentTime, 0.05);
+    return muted;
+  }
+  function isMuted() { return muted; }
+
+  /** 재질 미리듣기 — 메뉴의 '소리 도감'에서 사용 */
+  function preview(mat) {
+    if (!ready) init();
+    step(mat, { intensity: 0.75, pan: 0, depth: 0 });
+  }
+
+  return {
+    init: init,
+    step: step,
+    preview: preview,
+    whoosh: whoosh,
+    crack: crack,
+    shatter: shatter,
+    hollow: hollow,
+    getLevel: getLevel,
+    stepCorrect: stepCorrect,
+    solveBurst: solveBurst,
+    wrong: wrong,
+    newQuiz: newQuiz,
+    ui: ui,
+    registerSampleMap: registerSampleMap,
+    setMuted: setMuted,
+    isMuted: isMuted,
+    materials: Object.keys(MATERIAL)
+  };
+})();

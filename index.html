@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>소리 콩콩 학습 산책</title>
+<meta name="description" content="바닥을 밟는 소리가 ASMR이 되는 사회·수학 학습 게임">
+<meta name="theme-color" content="#1b2140">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🎧</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="game"></canvas>
+
+  <!-- ====== 상단 HUD (문제) ====== -->
+  <header id="hud">
+    <div class="hud-row">
+      <span id="subjectBadge" class="badge">사회</span>
+      <span id="topicBadge" class="badge ghost">지리</span>
+      <div class="spacer"></div>
+      <div id="scoreBox">
+        <span class="score-label">점수</span>
+        <span id="scoreVal">0</span>
+        <span id="comboVal" class="combo"></span>
+      </div>
+      <button id="btnMenu" class="icon-btn" aria-label="메뉴" aria-expanded="false">☰</button>
+    </div>
+    <h1 id="prompt">문제를 불러오는 중…</h1>
+    <div id="slots" class="slots"></div>
+    <p id="hint" class="hint"></p>
+  </header>
+
+  <!-- ====== 메뉴 (과목 필터 · 다음 문제 · 소리) ====== -->
+  <div id="menuPanel" hidden>
+    <div class="menu-group" role="group" aria-label="과목 선택">
+      <button class="ctl" data-subject="all">전체</button>
+      <button class="ctl" data-subject="social">사회</button>
+      <button class="ctl" data-subject="math">수학</button>
+    </div>
+    <button class="ctl wide" id="btnSkip">다음 문제 ▸</button>
+    <button class="ctl wide" id="btnMute">🔊 소리 끄기</button>
+    <button class="ctl wide" id="btnPads">🎮 조이스틱 켜기 / 끄기</button>
+
+    <div class="legend">
+      <div class="legend-title">소리 도감 <span>· 눌러서 들어보기</span></div>
+      <div id="legendList"></div>
+    </div>
+
+    <p class="menu-note">조이스틱으로 방향을 잡고 <b>쿵</b> 버튼을 눌러 점프.<br>키보드는 방향키로 조준하고 <b>Space</b>로 점프합니다.</p>
+  </div>
+
+  <!-- ====== 가상 조이스틱 / 점프 버튼 ====== -->
+  <div id="touchPad" aria-label="이동 조이스틱"><div id="touchNub"></div></div>
+  <button id="touchJump" aria-label="큰 점프">쿵</button>
+
+  <!-- ====== 시작 오버레이 (오디오 잠금 해제) ====== -->
+  <div id="startOverlay">
+    <div class="start-card">
+      <div class="start-emoji">🎧</div>
+      <h2>소리 콩콩 학습 산책</h2>
+      <p>사회와 수학 문제의 답을 <b>한 글자씩 순서대로</b> 밟으세요.</p>
+      <p class="how">
+        <span><b>①</b> 조이스틱(또는 방향키)으로 <b>방향을 잡고</b></span>
+        <span><b>②</b> <b>쿵</b> 버튼(또는 <b>Space</b>)을 눌러 <b>점프</b></span>
+        <span><b>③</b> 방향 없이 점프하면 제자리 <b>강한 내려찍기</b></span>
+      </p>
+      <p class="small">타일 생김새마다 소리가 달라요. 이어폰을 끼면 입체 음향이 훨씬 좋습니다.</p>
+      <button id="btnStart">산책 시작하기</button>
+    </div>
+  </div>
+
+  <div id="loadNote"></div>
+</div>
+
+<!-- 외부 JSON을 못 읽는 file:// 환경을 위한 내장 폴백 데이터 -->
+<script src="data/quizzes.fallback.js"></script>
+
+<script src="js/audio.js"></script>
+<script src="js/iso.js"></script>
+<script src="js/particles.js"></script>
+<script src="js/tiles.js"></script>
+<script src="js/player.js"></script>
+<script src="js/quiz.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
