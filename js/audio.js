@@ -17,7 +17,7 @@ window.SK = window.SK || {};
 SK.Audio = (function () {
   var ctx = null;
   var preMaster = null, master = null, dryBus = null, wetBus = null, convolver = null;
-  var warmth = null, limiter = null;
+  var warmth = null, limiter = null, saturator = null, satIn = null;
   var noiseBuf = null, samples = Object.create(null), lastVariant = Object.create(null);
   var sampleGain = Object.create(null);
   var analyser = null, levelBuf = null, smoothLevel = 0;
@@ -25,13 +25,18 @@ SK.Audio = (function () {
 
   function rnd(a, b) { return a + Math.random() * (b - a); }
 
+  /* 체인 드라이브. 재질별 음량을 가운데로 모으면서(docs 6장) 전체가 조금 내려가므로
+     그만큼을 여기서 되올린다. **소프트 클리퍼 앞**에 걸어야 출력이 1.0을 넘지 않는다.
+     master 게인은 음소거 페이드 전용으로 1.0에 둔다. */
+  var DRIVE = 1.05;
+
   /* =========================================================
    *  초기화 — 마스터 체인
    *
    *   voices ─▶ panner ─┬─▶ dryBus ─────────────┐
    *                     └─▶ send ─▶ wetBus ─▶ convolver ─┤
    *                                                      ▼
-   *              preMaster ─▶ lowShelf(따뜻함) ─▶ limiter ─▶ master ─▶ 출력
+   *              preMaster ─▶ lowShelf(따뜻함) ─▶ limiter ─▶ softClip ─▶ master ─▶ 출력
    * ======================================================= */
   function init() {
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return ctx; }
@@ -39,7 +44,7 @@ SK.Audio = (function () {
     ctx = new AC();
 
     master = ctx.createGain();
-    master.gain.value = 0.95;
+    master.gain.value = 1;
     master.connect(ctx.destination);
 
     analyser = ctx.createAnalyser();
@@ -48,6 +53,25 @@ SK.Audio = (function () {
     levelBuf = new Uint8Array(analyser.fftSize);
     master.connect(analyser);
 
+    /* 안전망 — 소프트 클리퍼.
+     *
+     *  아래 DynamicsCompressor 는 어택이 3ms라 **진짜 트랜지언트는 그냥 통과시킨다**.
+     *  발소리는 크레스트가 20dB을 넘나들어서, 컴프레서만 믿으면 세게 내려찍을 때
+     *  출력이 1.0을 넘어 하드 클리핑(지직) 이 났다 — 실측으로 1.10까지 나왔다.
+     *
+     *  0.65 아래는 손대지 않고 그 위만 tanh 로 접는다. ±2.0 입력까지 1.0 안에
+     *  가두므로 어떤 조합으로 소리가 겹쳐도 클리핑이 없고, 눌리는 구간에서는
+     *  아날로그 새추레이션처럼 살짝 두툼해진다. */
+    saturator = ctx.createWaveShaper();
+    saturator.curve = makeSoftClip(0.65, 2.0);
+    saturator.oversample = '4x';
+    saturator.connect(master);
+
+    // 파형쉐이퍼는 ±1 바깥을 끝값으로 잘라 버리므로, ±2.0 을 곡선 안에 넣어 준다
+    satIn = ctx.createGain();
+    satIn.gain.value = 0.5;
+    satIn.connect(saturator);
+
     // 여러 소리가 겹쳐도 지저분해지지 않도록 부드럽게 눌러 준다
     limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -14;
@@ -55,7 +79,7 @@ SK.Audio = (function () {
     limiter.ratio.value = 6;
     limiter.attack.value = 0.003;
     limiter.release.value = 0.16;
-    limiter.connect(master);
+    limiter.connect(satIn);
 
     // 근접 마이크 느낌의 저역 보강
     warmth = ctx.createBiquadFilter();
@@ -65,7 +89,7 @@ SK.Audio = (function () {
     warmth.connect(limiter);
 
     preMaster = ctx.createGain();
-    preMaster.gain.value = 1;
+    preMaster.gain.value = DRIVE;
     preMaster.connect(warmth);
 
     dryBus = ctx.createGain(); dryBus.gain.value = 1.0; dryBus.connect(preMaster);
@@ -88,6 +112,22 @@ SK.Audio = (function () {
     }
     ready = true;
     return ctx;
+  }
+
+  /**
+   * 소프트 클리핑 곡선. knee 아래는 y=x(손대지 않음), 그 위는 tanh 로 접어
+   * 어떤 입력이 와도 |y| < 1 을 지킨다.
+   * @param {number} knee  여기까지는 그대로 통과 (0~1)
+   * @param {number} range 곡선이 감당할 실제 입력 범위 — 앞단에서 1/range 를 곱해 넣는다
+   */
+  function makeSoftClip(knee, range) {
+    var n = 2048, c = new Float32Array(n), span = 1 - knee;
+    for (var i = 0; i < n; i++) {
+      var x = (i * 2 / (n - 1) - 1) * range;        // 실제 입력값
+      var s = x < 0 ? -1 : 1, a = Math.abs(x);
+      c[i] = a <= knee ? x : s * (knee + span * Math.tanh((a - knee) / span));
+    }
+    return c;
   }
 
   function makeNoise(sec) {
@@ -339,7 +379,7 @@ SK.Audio = (function () {
 
     /* 솜·쿠션 — 공기가 눌려 나가는 소리. 어택이 없고 아주 부드럽다 */
     cotton: function (d, D, i, r, t) {
-      var g = 0.050 + 0.062 * i;
+      var g = 0.088 + 0.109 * i;
       // 1) 눌리는 공기
       noiseVoice({
         dest: d, t: t, filter: 'lowpass', freq: 620 * r, freqEnd: 240 * r,
@@ -452,7 +492,7 @@ SK.Audio = (function () {
 
     /* 워터비즈(구슬볼) — 말랑한 구슬 여러 알이 굴러가며 톡톡 터진다 */
     orbeez: function (d, D, i, r, t) {
-      var g = 0.13 + 0.17 * i;
+      var g = 0.218 + 0.286 * i;
       // 1) 구슬 알들이 서로 부딪히는 소리
       var n = 5 + Math.round(i * 4);
       for (var k = 0; k < n; k++) {
@@ -502,7 +542,7 @@ SK.Audio = (function () {
 
     /* 유리구슬 — 길게 남는 맑은 링. 배음이 높고 감쇠가 느리다 */
     glass: function (d, D, i, r, t) {
-      var g = 0.104 + 0.133 * i;
+      var g = 0.111 + 0.142 * i;
       noiseVoice({ dest: d, t: t, filter: 'highpass', freq: 7000, gain: g * 0.9, dur: 0.005, attack: 0.0005 });
       modalVoice({
         dest: d, t: t, base: 880 * r, gain: g, jitter: 0.006,
@@ -543,7 +583,7 @@ SK.Audio = (function () {
 
     /* 스펀지 — 공기를 머금었다 내뱉는 뽀드득 */
     sponge: function (d, D, i, r, t) {
-      var g = 0.076 + 0.10 * i;
+      var g = 0.119 + 0.157 * i;
       squeak({ dest: d, t: t + 0.01, base: 900 * r, rise: 1.4, gain: g, count: 5, span: 0.12, q: 20 });
       noiseVoice({
         dest: d, t: t, filter: 'lowpass', freq: 900 * r, freqEnd: 320 * r,
@@ -828,9 +868,120 @@ SK.Audio = (function () {
     return smoothLevel;
   }
 
+  /* =========================================================
+   *  체감 음량 측정 (개발용)
+   *
+   *  getLevel() 은 화면 연출용 **피크** 미터다. 피크는 트랜지언트를 과대평가해서,
+   *  '탁' 하고 끝나는 나무 소리를 실제보다 크다고 읽는다. 이 미터로 음량 밸런스를
+   *  맞추면 실제로는 10dB 이상 어긋난 채로 "맞췄다"고 착각하게 된다 — 실제로 그랬다.
+   *
+   *  그래서 밸런스 조율에는 방송 표준 BS.1770 의 **K-가중** 라우드니스를 쓴다.
+   *  고역 셸빙(+4dB @1.68kHz) → 하이패스(38Hz) 를 거친 뒤 평균 전력을 재는 것으로,
+   *  오프라인 도구(`tools/prep-steps.py`)가 wav 파일에 쓰는 잣대와 같다.
+   * ======================================================= */
+  var kAnalyser = null, kBuf = null;
+
+  function kMeter() {
+    if (kAnalyser) return kAnalyser;
+    var hs = ctx.createBiquadFilter();
+    hs.type = 'highshelf'; hs.frequency.value = 1681.97; hs.gain.value = 4;
+    var hp = ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 38.14; hp.Q.value = 0.5;
+    kAnalyser = ctx.createAnalyser();
+    kAnalyser.fftSize = 2048;
+    kAnalyser.smoothingTimeConstant = 0;
+    master.connect(hs); hs.connect(hp); hp.connect(kAnalyser);
+    kBuf = new Float32Array(kAnalyser.fftSize);
+    return kAnalyser;
+  }
+
+  /**
+   * 재질 하나를 여러 번 울려 K-가중 라우드니스를 잰다.
+   * 절대값 자체는 의미가 없고 **재질끼리 비교**하는 데 쓴다.
+   * @returns {Promise<number>}
+   */
+  function loudness(mat, o) {
+    o = o || {};
+    // win = 적분 창(온셋 기준). 250ms 는 짧은 타격음의 청각 적분 시간이고,
+    // tools/prep-steps.py 가 wav 를 재는 창과 같아야 두 수치를 비교할 수 있다.
+    var reps = o.reps || 5, win = o.win || 250, span = o.span || 620, gap = o.gap || 300;
+    var step_ms = 8;
+    if (!ready) init();
+    var an = kMeter();
+    var runs = [];
+
+    function once() {
+      return new Promise(function (done) {
+        var pow = [];
+        preview(mat);
+        var t0 = performance.now();
+        (function poll() {
+          an.getFloatTimeDomainData(kBuf);
+          var s = 0;
+          for (var i = 0; i < kBuf.length; i++) s += kBuf[i] * kBuf[i];
+          pow.push(s / kBuf.length);
+          if (performance.now() - t0 < span) { setTimeout(poll, step_ms); return; }
+
+          // 트리거 시점이 아니라 **소리가 실제로 시작한 지점**부터 잰다.
+          // 앞의 무음까지 창에 넣으면 짧은 소리(키캡)만 부당하게 작게 읽힌다.
+          var mx = 0, k;
+          for (k = 0; k < pow.length; k++) if (pow[k] > mx) mx = pow[k];
+          var start = 0;
+          for (k = 0; k < pow.length; k++) { if (pow[k] > mx * 0.02) { start = k; break; } }
+          var n = Math.max(1, Math.round(win / step_ms)), sum = 0, cnt = 0;
+          for (k = start; k < Math.min(pow.length, start + n); k++) { sum += pow[k]; cnt++; }
+          runs.push(Math.sqrt(sum / Math.max(1, cnt)));
+          setTimeout(done, gap);
+        })();
+      });
+    }
+
+    var chain = Promise.resolve();
+    for (var k = 0; k < reps; k++) chain = chain.then(once);
+    return chain.then(function () {
+      runs.sort(function (a, b) { return a - b; });
+      return runs[Math.floor(runs.length / 2)];      // 중앙값 — 휴머나이즈 흔들림에 강하다
+    });
+  }
+
+  /** 마스터 출력의 순간 피크(0~1). 헤드룸이 얼마나 남았는지 볼 때 쓴다. */
+  var peakBuf = null;
+  function peak() {
+    if (!analyser) return 0;
+    if (!peakBuf) peakBuf = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(peakBuf);
+    var p = 0;
+    for (var i = 0; i < peakBuf.length; i++) {
+      var v = peakBuf[i] < 0 ? -peakBuf[i] : peakBuf[i];
+      if (v > p) p = v;
+    }
+    return p;
+  }
+
+  /** 12종을 모두 재서 큰 것부터 표로 돌려준다. 콘솔에서 바로 쓰라고 만든 것. */
+  function loudnessTable(o) {
+    var mats = Object.keys(MATERIAL), out = [];
+    var chain = Promise.resolve();
+    mats.forEach(function (m) {
+      chain = chain.then(function () {
+        return loudness(m, o).then(function (v) { out.push({ mat: m, loudness: v }); });
+      });
+    });
+    return chain.then(function () {
+      out.sort(function (a, b) { return b.loudness - a.loudness; });
+      var top = out[0].loudness, bot = out[out.length - 1].loudness;
+      out.forEach(function (r) {
+        r.LU = Math.round(20 * Math.log10(r.loudness / top) * 10) / 10;  // 가장 큰 것 대비
+        r.suggest = Math.round(top / r.loudness * 1000) / 1000;          // 맞추려면 곱할 값
+      });
+      out.spreadDb = Math.round(20 * Math.log10(top / bot) * 10) / 10;
+      return out;
+    });
+  }
+
   function setMuted(m) {
     muted = m;
-    if (master) master.gain.setTargetAtTime(m ? 0 : 0.95, ctx.currentTime, 0.05);
+    if (master) master.gain.setTargetAtTime(m ? 0 : 1, ctx.currentTime, 0.05);
     return muted;
   }
   function isMuted() { return muted; }
@@ -850,6 +1001,9 @@ SK.Audio = (function () {
     shatter: shatter,
     hollow: hollow,
     getLevel: getLevel,
+    loudness: loudness,
+    loudnessTable: loudnessTable,
+    peak: peak,
     wrong: wrong,
     newQuiz: newQuiz,
     ui: ui,

@@ -203,23 +203,70 @@ SK.Game = (function () {
    *  터치·마우스·스타일러스를 같은 코드로 처리한다.
    * ======================================================= */
   var padActive = false;
+  var padAimEl = null;
+
+  /* 조이스틱 조작감을 좌우하는 값들.
+   *
+   *  · 원점은 패드 한가운데가 아니라 **손가락이 처음 닿은 자리**다(플로팅 스틱).
+   *    고정 원점이면 패드 가장자리를 짚는 순간 그 방향이 곧바로 입력돼서,
+   *    "잡자마자 엉뚱한 데를 조준한다"가 된다.
+   *  · 손가락이 반경 밖으로 나가면 원점이 따라가며(리센터) 스틱이 계속 살아 있다.
+   *  · 데드존은 픽셀이 아니라 반경 비율로 잡는다 — 화면 크기가 달라도 감이 같다.
+   */
+  var DEAD = 0.26;          // 반경 대비 데드존
+  var SMOOTH = 0.45;        // 방향 벡터 지수 평활 — 손 떨림을 걸러 낸다
 
   function bindVirtualControls() {
     var pad = document.getElementById('touchPad');
     var nub = document.getElementById('touchNub');
     var jmp = document.getElementById('touchJump');
     if (!pad || !jmp) return;
+    padAimEl = document.getElementById('touchAim');
 
     var padId = null, cx = 0, cy = 0, radius = 46;
+    var sx = 0, sy = 0;                              // 평활된 방향 벡터
 
     function updateFrom(e) {
       var dx = e.clientX - cx, dy = e.clientY - cy;
       var len = Math.hypot(dx, dy);
-      var k = len > radius ? radius / len : 1;
-      nub.style.transform = 'translate(' + (dx * k) + 'px,' + (dy * k) + 'px)';
-      if (len < 12) { input.dx = 0; input.dy = 0; return; }
-      input.dx = dx / len;
-      input.dy = dy / len;
+
+      // 반경을 넘어가면 원점을 끌고 간다 — 손가락이 패드 밖으로 나가도 계속 조작된다
+      if (len > radius) {
+        var over = (len - radius) / len;
+        cx += dx * over; cy += dy * over;
+        dx -= dx * over; dy -= dy * over;
+        len = radius;
+      }
+
+      nub.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+
+      var mag = len / radius;
+      if (mag < DEAD) {
+        sx = sy = 0;
+        input.dx = 0; input.dy = 0;
+        if (padAimEl) padAimEl.style.opacity = '0';
+        return;
+      }
+      // 데드존 바깥을 0~1로 다시 펼친다(데드존 경계에서 값이 튀지 않게)
+      var k = (mag - DEAD) / (1 - DEAD) / len;
+      var tx = dx * k, ty = dy * k;
+      sx += (tx - sx) * SMOOTH;
+      sy += (ty - sy) * SMOOTH;
+      input.dx = sx; input.dy = sy;
+      showPadAim(radius);
+    }
+
+    /** 스틱이 어느 칸으로 확정됐는지 패드 위에 점으로 보여 준다 */
+    function showPadAim(r) {
+      if (!padAimEl) return;
+      var dir = SK.Player.quantize(input.dx, input.dy, player && player.aimDir);
+      if (!dir) { padAimEl.style.opacity = '0'; return; }
+      var ax = (dir.di - dir.dj) * (SK.Iso.TW / 2);
+      var ay = (dir.di + dir.dj) * (SK.Iso.TH / 2);
+      var n = Math.hypot(ax, ay) || 1;
+      padAimEl.style.opacity = '1';
+      padAimEl.style.transform =
+        'translate(' + (ax / n * r * 0.92) + 'px,' + (ay / n * r * 0.92) + 'px)';
     }
 
     pad.addEventListener('pointerdown', function (e) {
@@ -228,10 +275,17 @@ SK.Game = (function () {
       padActive = true;
       try { pad.setPointerCapture(e.pointerId); } catch (_) { }
       var r = pad.getBoundingClientRect();
-      cx = r.left + r.width / 2; cy = r.top + r.height / 2;
-      radius = r.width * 0.38;
+      radius = r.width * 0.42;
+      // 짚은 자리를 원점으로. 단, 패드 밖(확장 히트영역)을 짚었다면 가운데로 당겨 둔다.
+      var mx = r.left + r.width / 2, my = r.top + r.height / 2;
+      var ox = e.clientX - mx, oy = e.clientY - my;
+      var od = Math.hypot(ox, oy);
+      var pull = od > radius ? radius / od : 1;
+      cx = mx + ox * pull; cy = my + oy * pull;
+      sx = sy = 0;
+      input.dx = 0; input.dy = 0;
+      nub.style.transform = 'translate(' + (cx - mx) + 'px,' + (cy - my) + 'px)';
       pad.classList.add('active');
-      updateFrom(e);
     });
     pad.addEventListener('pointermove', function (e) {
       if (e.pointerId !== padId) return;
@@ -241,8 +295,10 @@ SK.Game = (function () {
     function endPad(e) {
       if (padId !== null && e.pointerId !== padId) return;
       padId = null; padActive = false;
+      sx = sy = 0;
       input.dx = 0; input.dy = 0;
       nub.style.transform = '';
+      if (padAimEl) padAimEl.style.opacity = '0';
       pad.classList.remove('active');
       syncKeyDir();
     }

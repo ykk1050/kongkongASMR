@@ -29,13 +29,54 @@ SK.Player = (function () {
     { dx: -1, dy: -1, di: -1, dj: 0 }   // ↖
   ];
 
-  /** 아날로그 입력(dx,dy)을 8방향 중 하나로 양자화 */
-  function quantize(dx, dy) {
-    if (dx === 0 && dy === 0) return null;
-    var ang = Math.atan2(dy, dx);                 // -π..π, 화면 기준
-    var idx = Math.round((ang + Math.PI / 2) / (Math.PI / 4));
-    idx = ((idx % 8) + 8) % 8;
-    return DIRS[idx];
+  /* 각 방향의 **실제 화면 각도**.
+   *
+   *  아이소메트릭에서 이웃 타일은 화면상 45°씩 놓여 있지 않다. 타일이 2:1 다이아몬드
+   *  (TW 116 × TH 58)이므로 이웃 여덟 칸은
+   *
+   *        -90° · -26.6° · 0° · +26.6° · +90° · +153.4° · 180° · -153.4°
+   *
+   *  에 있다. 예전 quantize() 는 이걸 균등한 45° 부채꼴로 나눠서, 화면에서 26.6°
+   *  위에 보이는 타일을 조준하려면 스틱을 45°로 밀어야 했다 — **최대 18.4° 어긋남**.
+   *  게다가 위·아래 방향은 63°짜리 넓은 구역을, 얕은 대각선은 26°짜리 좁은 구역을
+   *  받아서 "위는 잘 되는데 대각선이 안 잡힌다"가 됐다.
+   *
+   *  이제는 실제 화면 벡터와의 내적이 가장 큰 방향을 고른다. 스틱이 가리키는 쪽에
+   *  보이는 타일이 그대로 잡힌다.
+   */
+  var DIR_SCREEN = null;
+
+  function screenDirs() {
+    if (DIR_SCREEN) return DIR_SCREEN;
+    var I = window.SK && SK.Iso;
+    var tw = I ? I.TW : 116, th = I ? I.TH : 58;
+    DIR_SCREEN = DIRS.map(function (d) {
+      var x = (d.di - d.dj) * (tw / 2);
+      var y = (d.di + d.dj) * (th / 2);
+      var n = Math.hypot(x, y) || 1;
+      return { x: x / n, y: y / n };
+    });
+    return DIR_SCREEN;
+  }
+
+  // 경계에서 방향이 파르르 떨리지 않도록, 이미 잡고 있던 방향에 주는 가산점
+  var STICKY = 0.05;
+
+  /**
+   * 아날로그 입력(dx,dy)을 8방향 중 하나로 양자화.
+   * @param {object} prev 직전 방향 — 있으면 히스테리시스가 걸린다
+   */
+  function quantize(dx, dy, prev) {
+    var len = Math.hypot(dx, dy);
+    if (len < 1e-6) return null;
+    var ux = dx / len, uy = dy / len;
+    var S = screenDirs(), best = -2, bi = 0;
+    for (var k = 0; k < S.length; k++) {
+      var dot = ux * S[k].x + uy * S[k].y;
+      if (prev === DIRS[k]) dot += STICKY;
+      if (dot > best) { best = dot; bi = k; }
+    }
+    return DIRS[bi];
   }
 
   function create(ci, cj) {
@@ -85,7 +126,7 @@ SK.Player = (function () {
     }
 
     // 조준 방향은 점프 여부와 상관없이 항상 갱신한다(목표 타일 표시용)
-    p.aimDir = quantize(input.dx, input.dy);
+    p.aimDir = quantize(input.dx, input.dy, p.aimDir);
 
     if (p.hopping) {
       advanceHop(p, dt, world, ev);

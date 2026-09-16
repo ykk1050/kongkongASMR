@@ -7,6 +7,9 @@
 :root{
   --bg1:#1b2140; --bg2:#2b2f5e; --ink:#f4f6ff; --dim:rgba(244,246,255,.62);
   --accent:#ffd66b; --good:#8ef0c0; --bad:#ff9aa8;
+  /* 조준 색 — 힌트(노랑)·정답(초록)·오답(분홍) 중 어느 것과도 겹치지 않는 청록.
+     눈·모래처럼 흰 타일 위에서도 읽히도록 캔버스 쪽에서 어두운 외곽선을 함께 깐다. */
+  --aim:#5df0ff;
   --st: env(safe-area-inset-top, 0px);
   --sb: env(safe-area-inset-bottom, 0px);
   --sl: env(safe-area-inset-left, 0px);
@@ -134,11 +137,21 @@ body{
   display:grid;place-items:center;touch-action:none;
   backdrop-filter:blur(4px);
 }
+/* 손가락이 테두리를 살짝 빗나가도 잡히도록 히트 영역을 넓힌다 */
+#touchPad::before{content:'';position:absolute;inset:-20px;border-radius:50%}
 #touchPad.active{background:rgba(255,255,255,.13);border-color:rgba(255,214,107,.6)}
 #touchNub{
+  grid-area:1/1;
   width:calc(var(--pad-size) * .4);height:calc(var(--pad-size) * .4);border-radius:50%;
   background:rgba(255,255,255,.34);border:1px solid rgba(255,255,255,.4);
   pointer-events:none;transition:transform .05s linear;
+}
+/* 여덟 방향 중 실제로 확정된 칸을 패드 위에 점으로 알려 준다 */
+#touchAim{
+  grid-area:1/1;
+  width:14px;height:14px;border-radius:50%;
+  background:var(--aim,#5df0ff);box-shadow:0 0 10px 2px rgba(93,240,255,.75);
+  pointer-events:none;opacity:0;transition:transform .07s ease-out,opacity .12s linear;
 }
 #touchJump{
   position:absolute;z-index:7;
