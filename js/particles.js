@@ -315,6 +315,19 @@ SK.Particles = (function () {
     });
   }
 
+  /**
+   * 정답 임팩트 — 정답 칸 위에 찍히는 도장.
+   * 정답 효과음을 없앤 자리를 대신하므로, 소리 없이도 알아볼 만큼 크게 그린다.
+   * @param {number} [delay] 초 단위 지연 — 여러 칸을 차례로 터뜨릴 때
+   */
+  function solveMark(gx, gy, delay) {
+    push({ type: 'stamp', gx: gx, gy: gy, gz: 0.02, life: 0.78, size: 1, delay: delay || 0 });
+    push({ type: 'ring', gx: gx, gy: gy, gz: 0.06, life: 0.5, size: 125, width: 5,
+           color: 'rgba(255,255,255,', delay: delay || 0 });
+    push({ type: 'ring', gx: gx, gy: gy, gz: 0.06, life: 0.78, size: 215, width: 3,
+           color: 'rgba(142,240,192,', delay: delay || 0 });
+  }
+
   /** 문제 완성 대폭발 */
   function celebrate(gx, gy) {
     ring(gx, gy, { size: 190, life: 0.7, width: 6, color: 'rgba(255,255,255,' });
@@ -337,6 +350,7 @@ SK.Particles = (function () {
   function update(dt) {
     for (var i = list.length - 1; i >= 0; i--) {
       var p = list[i];
+      if (p.delay > 0) { p.delay -= dt; continue; }
       p.age += dt;
       if (p.age >= p.life) { list.splice(i, 1); continue; }
       var k = dt * 3.6;
@@ -356,6 +370,7 @@ SK.Particles = (function () {
     var proj = project || function (gx, gy, gz) { return Iso.toScreen(gx, gy, gz); };
     for (var i = 0; i < list.length; i++) {
       var p = list[i];
+      if (p.delay > 0) continue;
       var t = p.age / p.life;
       var a = 1 - t;
       var s = proj(p.gx, p.gy, p.gz);
@@ -396,6 +411,10 @@ SK.Particles = (function () {
           ctx.strokeStyle = p.color + (a * 0.85) + ')';
           ctx.lineWidth = p.width * (1 - t * 0.6) * (Iso.TW / Iso.TH);
           ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.2832); ctx.stroke();
+          break;
+
+        case 'stamp':
+          drawStamp(ctx, Iso, s.x, s.y, t, a);
           break;
 
         case 'puff':
@@ -484,6 +503,52 @@ SK.Particles = (function () {
 
   function easeOut(t) { return 1 - Math.pow(1 - t, 2.2); }
 
+  /** 정답 도장 — 밝게 번지는 마름모 + 솟아오르는 체크 */
+  function drawStamp(ctx, Iso, x, y, t, a) {
+    var w = Iso.TW / 2, h = Iso.TH / 2;
+    var ease = easeOut(t);
+
+    function dia(k) {
+      ctx.beginPath();
+      ctx.moveTo(x, y - h * k); ctx.lineTo(x + w * k, y);
+      ctx.lineTo(x, y + h * k); ctx.lineTo(x - w * k, y);
+      ctx.closePath();
+    }
+
+    // 1) 칸 전체가 하얗게 달아올랐다 식는다
+    ctx.fillStyle = 'rgba(255,255,255,' + (0.62 * a * a) + ')';
+    dia(0.95); ctx.fill();
+    ctx.fillStyle = 'rgba(142,240,192,' + (0.35 * a) + ')';
+    dia(0.95); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.9 * a) + ')';
+    ctx.lineWidth = 3.5; dia(0.95); ctx.stroke();
+
+    // 2) 사방으로 튀는 빛줄기
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.85 * a) + ')';
+    ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    for (var k = 0; k < 6; k++) {
+      var ang = k * 1.0472 + 0.5236;
+      var dx = Math.cos(ang), dy = Math.sin(ang) * (h / w);
+      var r0 = w * (0.5 + ease * 0.7), r1 = r0 + w * 0.2 * a;
+      ctx.beginPath();
+      ctx.moveTo(x + dx * r0, y + dy * r0);
+      ctx.lineTo(x + dx * r1, y + dy * r1);
+      ctx.stroke();
+    }
+
+    // 3) 위로 솟구치며 커지는 체크
+    var cy = y - ease * Iso.TH * 1.15;
+    var sc = 0.6 + ease * 0.75;
+    ctx.strokeStyle = 'rgba(255,255,255,' + a + ')';
+    ctx.lineWidth = w * 0.17 * sc;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - w * 0.34 * sc, cy);
+    ctx.lineTo(x - w * 0.10 * sc, cy + h * 0.48 * sc);
+    ctx.lineTo(x + w * 0.36 * sc, cy - h * 0.62 * sc);
+    ctx.stroke();
+  }
+
   function drawStar(ctx, r) {
     ctx.beginPath();
     for (var i = 0; i < 8; i++) {
@@ -504,6 +569,7 @@ SK.Particles = (function () {
     stepBurst: stepBurst, crackBits: crackBits, shatter: shatter, trail: trail,
     tileBreak: tileBreak,
     stars: stars, ring: ring, text: text, celebrate: celebrate,
+    solveMark: solveMark,
     update: update, draw: draw, clear: clear, count: count
   };
 })();

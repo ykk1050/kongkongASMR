@@ -632,23 +632,34 @@ SK.Audio = (function () {
     var key = 'crack_' + mat;
     if (samples[key]) { playSample(key, d, t, rate, 0.6 + prog * 0.4); return; }
 
+    // 재질의 밟는 소리가 먼저 들려야 소리 도감과 같은 재질로 인식된다.
+    // 균열음은 그 위에 얹는 덧소리일 뿐이다.
+    var layered = false;
+    if (samples['step_' + mat]) {
+      playSample('step_' + mat, d, t, rate, 0.85 + prog * 0.25);
+      layered = true;
+    } else {
+      (MATERIAL[mat] || MATERIAL.wood)(d, D, 0.45 + prog * 0.3, rate, t);
+    }
+    var cg = layered ? 0.45 : 1;
+
     if (mat === 'bubble') {
       // 알이 하나씩 터진다 — 단계가 올라갈수록 더 높고 짧게
       noiseVoice({
         dest: d, t: t, filter: 'bandpass',
-        freq: 600 * rate, freqEnd: 3000 * rate, q: 15, gain: 0.15, dur: 0.02, attack: 0.0005
+        freq: 600 * rate, freqEnd: 3000 * rate, q: 15, gain: 0.15 * cg, dur: 0.02, attack: 0.0005
       });
-      toneVoice({ dest: d, t: t, freq: 480 * rate, freqEnd: 3200 * rate, type: 'sine', gain: 0.08, dur: 0.014, attack: 0.0006 });
-      granular({ dests: D, t: t + 0.01, count: 7, span: 0.08, freq: [4500, 11500], q: 3, gain: 0.05, grain: [0.003, 0.01] });
+      toneVoice({ dest: d, t: t, freq: 480 * rate, freqEnd: 3200 * rate, type: 'sine', gain: 0.08 * cg, dur: 0.014, attack: 0.0006 });
+      granular({ dests: D, t: t + 0.01, count: 7, span: 0.08, freq: [4500, 11500], q: 3, gain: 0.05 * cg, grain: [0.003, 0.01] });
     } else {
       // 마른 것이 갈라진다 — 균열이 번지는 그래뉼러
       granular({
         dests: D, t: t, count: 14 + Math.round(prog * 10), span: 0.16,
-        freq: [2200 * rate, 9000 * rate], q: 5, gain: 0.19 + prog * 0.11,
+        freq: [2200 * rate, 9000 * rate], q: 5, gain: (0.19 + prog * 0.11) * cg,
         grain: [0.004, 0.018], decay: 1.0
       });
       modalVoice({
-        dest: d, t: t, base: 170 * rate, gain: 0.1, jitter: 0.06,
+        dest: d, t: t, base: 170 * rate, gain: 0.1 * cg, jitter: 0.06,
         modes: [{ f: 1.0, d: 0.06, g: 1.0 }, { f: 2.7, d: 0.035, g: 0.4 }]
       });
     }
@@ -666,7 +677,13 @@ SK.Audio = (function () {
     var key = 'shatter_' + mat;
     if (samples[key]) { playSample(key, d, t, 1, 1); return; }
 
-    (MATERIAL[mat] || MATERIAL.wood)(d, D, 1, 1.05, t);
+    var sg = 1;
+    if (samples['step_' + mat]) {
+      playSample('step_' + mat, d, t, 0.92, 0.9);
+      sg = 0.5;
+    } else {
+      (MATERIAL[mat] || MATERIAL.wood)(d, D, 1, 1.05, t);
+    }
 
     if (mat === 'bubble') {
       // 남은 알들이 연쇄로 터진다
@@ -674,15 +691,15 @@ SK.Audio = (function () {
         var pt = t + 0.01 + Math.random() * 0.22;
         noiseVoice({
           dest: D[k % 3], t: pt, filter: 'bandpass',
-          freq: rnd(550, 900), freqEnd: rnd(2600, 3600), q: 13, gain: 0.1, dur: 0.02, attack: 0.0005
+          freq: rnd(550, 900), freqEnd: rnd(2600, 3600), q: 13, gain: 0.1 * sg, dur: 0.02, attack: 0.0005
         });
       }
     }
     granular({
       dests: D, t: t + 0.005, count: 30, span: 0.34,
-      freq: [2000, 11000], q: 4, gain: 0.055, grain: [0.004, 0.024], decay: 1.4
+      freq: [2000, 11000], q: 4, gain: 0.055 * sg, grain: [0.004, 0.024], decay: 1.4
     });
-    toneVoice({ dest: d, t: t, freq: 108, freqEnd: 62, type: 'sine', gain: 0.09, dur: 0.2, lp: 300 });
+    toneVoice({ dest: d, t: t, freq: 108, freqEnd: 62, type: 'sine', gain: 0.09 * sg, dur: 0.2, lp: 300 });
   }
 
   /** 이미 부서진 자리를 밟았을 때의 공허한 울림 */
@@ -701,78 +718,6 @@ SK.Audio = (function () {
   /* =========================================================
    *  퀴즈 피드백
    * ======================================================= */
-
-  var PENTA = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5, 1174.66, 1318.51];
-
-  /** 한 글자 정답 — 맑은 크리스털 '팅' */
-  function stepCorrect(index, o) {
-    if (!ready || muted) return;
-    o = o || {};
-    var pan = o.pan || 0;
-    var d = spatial(pan, 0, 0.5);
-    var D = spatialTrio(pan, 0, 0.5, 0.22);
-    var t = ctx.currentTime + 0.001;
-    if (samples['quiz_step']) { playSample('quiz_step', d, t, Math.pow(1.0595, index * 2), 1); return; }
-
-    var f = PENTA[Math.min(index, PENTA.length - 1)];
-    // 말렛이 닿는 순간
-    noiseVoice({ dest: d, t: t, filter: 'bandpass', freq: f * 5, q: 2.2, gain: 0.05, dur: 0.008, attack: 0.0006 });
-    // 유리 종 — 길게 남는 비조화 모드
-    modalVoice({
-      dest: d, t: t, base: f, gain: 0.2, jitter: 0.004,
-      modes: [
-        { f: 1.00, d: 0.75, g: 1.00 },
-        { f: 2.76, d: 0.42, g: 0.28 },
-        { f: 5.40, d: 0.22, g: 0.12 },
-        { f: 8.93, d: 0.12, g: 0.05 }
-      ]
-    });
-    // 반짝이는 스파클
-    granular({
-      dests: D, t: t + 0.005, count: 8, span: 0.18,
-      freq: [f * 6, f * 14], q: 6, gain: 0.022, grain: [0.004, 0.014], decay: 1.6
-    });
-  }
-
-  /** 문제 완성 — 가장 청량한 ASMR 폭발 */
-  function solveBurst(o) {
-    if (!ready || muted) return;
-    o = o || {};
-    var pan = o.pan || 0;
-    var d = spatial(pan, 0, 0.7);
-    var D = spatialTrio(pan, 0, 0.7, 0.45);
-    var t = ctx.currentTime + 0.001;
-    if (samples['quiz_solve']) { playSample('quiz_solve', d, t, 1, 1); return; }
-
-    // 1) 상승하는 종 아르페지오
-    var arp = [523.25, 659.25, 783.99, 1046.5, 1318.51];
-    for (var k = 0; k < arp.length; k++) {
-      modalVoice({
-        dest: d, t: t + k * 0.058, base: arp[k], gain: 0.13, jitter: 0.004,
-        modes: [
-          { f: 1.00, d: 0.9 - k * 0.08, g: 1.00 },
-          { f: 2.76, d: 0.4, g: 0.24 },
-          { f: 5.40, d: 0.2, g: 0.10 }
-        ]
-      });
-    }
-    // 2) 뽁뽁이 연쇄 팝
-    for (var p = 0; p < 12; p++) {
-      var pt = t + 0.02 + Math.random() * 0.5;
-      noiseVoice({
-        dest: D[p % 3], t: pt, filter: 'bandpass',
-        freq: rnd(560, 1100), freqEnd: rnd(2600, 3800), q: 13,
-        gain: 0.06, dur: 0.02, attack: 0.0005
-      });
-    }
-    // 3) 머리 주변을 감싸는 반짝임
-    granular({
-      dests: D, t: t + 0.04, count: 34, span: 0.65,
-      freq: [5000, 14000], q: 5, gain: 0.025, grain: [0.004, 0.02], decay: 0.8
-    });
-    // 4) 따뜻한 저역 스웰
-    toneVoice({ dest: d, t: t, freq: 130.81, type: 'sine', gain: 0.08, dur: 0.9, attack: 0.05, lp: 400 });
-  }
 
   /** 오답 — 둔탁하지만 불쾌하지 않게 */
   function wrong(o) {
@@ -905,8 +850,6 @@ SK.Audio = (function () {
     shatter: shatter,
     hollow: hollow,
     getLevel: getLevel,
-    stepCorrect: stepCorrect,
-    solveBurst: solveBurst,
     wrong: wrong,
     newQuiz: newQuiz,
     ui: ui,

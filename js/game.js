@@ -531,9 +531,10 @@ SK.Game = (function () {
       // 정답 타일은 별빛과 함께 원래대로 복구된다 —
       // 소모성 재질이라도 정답 진행이 막히는 일이 없도록.
       SK.Tiles.reset(t);
-      SK.Audio.stepCorrect(r.index, { pan: pan });
-      SK.Particles.stars(t.i, t.j, 18);
+      SK.Particles.solveMark(t.i, t.j);
+      SK.Particles.stars(t.i, t.j, 26);
       SK.Particles.ring(t.i, t.j, { size: 105, life: 0.45, width: 4, color: 'rgba(142,240,192,' });
+      SK.Particles.ring(t.i, t.j, { size: 168, life: 0.62, width: 2, color: 'rgba(255,255,255,' });
       SK.Particles.text(t.i, t.j, POP_WORDS[r.index % POP_WORDS.length], {
         size: 22, color: '#8ef0c0', life: 0.8
       });
@@ -553,9 +554,8 @@ SK.Game = (function () {
     phase = 'solved';
     phaseTimer = 2.1;
     score += 50 * combo;
-    SK.Audio.solveBurst({ pan: pan });
     SK.Particles.celebrate(t.i, t.j);
-    setFlash(0.4, 48);
+    setFlash(0.55, 148);
     SK.Particles.text(t.i, t.j, 'CRACKLE-POP!', { size: 32, color: '#ffd66b', gz: 0.9, life: 1.4 });
     SK.Particles.text(player.x, player.y, 'PERFECT!', { size: 38, color: '#ffffff', gz: 1.5, life: 1.5, tilt: -0.06 });
     cam.shake = 0.9;
@@ -563,7 +563,9 @@ SK.Game = (function () {
       if (quizTiles[k].correct) {
         quizTiles[k].state = 'done';
         quizTiles[k].flash = 1;
-        SK.Particles.stars(quizTiles[k].i, quizTiles[k].j, 8);
+        // 왼쪽부터 차례로 터지게 해서 '완성됐다'는 흐름이 보이게 한다
+        SK.Particles.solveMark(quizTiles[k].i, quizTiles[k].j, k * 0.11);
+        SK.Particles.stars(quizTiles[k].i, quizTiles[k].j, 14);
       }
     }
     renderHUD();
