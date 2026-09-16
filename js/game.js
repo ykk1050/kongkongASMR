@@ -160,29 +160,55 @@ SK.Game = (function () {
   /* =========================================================
    *  입력 — 키보드
    * ======================================================= */
-  var KEYMAP = {
-    ArrowUp: 'up', KeyW: 'up',
-    ArrowDown: 'down', KeyS: 'down',
-    ArrowLeft: 'left', KeyA: 'left',
-    ArrowRight: 'right', KeyD: 'right',
-    Space: 'jump', Enter: 'jump'
+  /* 키 하나가 곧 화면 방향 벡터다.
+   *
+   *  ⚠ **대각선 전용 키가 왜 필요한가**
+   *  W·A·S·D 만 있으면 대각선은 두 키를 함께 눌러야 하고, 여기에 점프까지 더하면
+   *  `W`+`A`+`Space` 로 **세 키 동시입력**이 된다. 값싼 멤브레인 키보드는 3키 롤오버를
+   *  전부 받아 주지 못하고, 어느 조합이 막히는지는 키 매트릭스 배선마다 다르다.
+   *  그래서 "오른쪽 위는 되는데 왼쪽 위만 안 된다" 같은 일이 실제로 생긴다.
+   *
+   *  Q·E·Z·C(그리고 넘패드 7·9·1·3)는 **키 하나가 대각선 하나**라서,
+   *  점프까지 합쳐도 두 키면 된다. 하드웨어가 무엇이든 8방향이 다 나온다.
+   */
+  var KEYDIR = {
+    ArrowUp: [0, -1], KeyW: [0, -1],
+    ArrowDown: [0, 1], KeyS: [0, 1],
+    ArrowLeft: [-1, 0], KeyA: [-1, 0],
+    ArrowRight: [1, 0], KeyD: [1, 0],
+
+    KeyQ: [-1, -1], KeyE: [1, -1], KeyZ: [-1, 1], KeyC: [1, 1],
+
+    Numpad8: [0, -1], Numpad2: [0, 1], Numpad4: [-1, 0], Numpad6: [1, 0],
+    Numpad7: [-1, -1], Numpad9: [1, -1], Numpad1: [-1, 1], Numpad3: [1, 1]
   };
+  var JUMPKEY = { Space: 1, Enter: 1, NumpadEnter: 1, Numpad5: 1, NumpadAdd: 1 };
 
   function bindKeys() {
     window.addEventListener('keydown', function (e) {
-      var k = KEYMAP[e.code];
-      if (!k) return;
+      if (JUMPKEY[e.code]) {
+        e.preventDefault();
+        if (!input.keys[e.code]) input.jump = true;
+        input.keys[e.code] = true;
+        input.jumpHeld = true;
+        return;
+      }
+      if (!KEYDIR[e.code]) return;
       e.preventDefault();
-      if (k === 'jump') { if (!input.keys.jump) input.jump = true; input.jumpHeld = true; }
-      input.keys[k] = true;
+      input.keys[e.code] = true;
       syncKeyDir();
     });
     window.addEventListener('keyup', function (e) {
-      var k = KEYMAP[e.code];
-      if (!k) return;
+      if (JUMPKEY[e.code]) {
+        e.preventDefault();
+        input.keys[e.code] = false;
+        // 점프 키를 여러 개 두었으므로, 하나를 떼도 다른 하나가 눌려 있으면 유지한다
+        input.jumpHeld = anyHeld(JUMPKEY);
+        return;
+      }
+      if (!KEYDIR[e.code]) return;
       e.preventDefault();
-      if (k === 'jump') input.jumpHeld = false;
-      input.keys[k] = false;
+      input.keys[e.code] = false;
       syncKeyDir();
     });
     window.addEventListener('blur', function () {
@@ -192,10 +218,22 @@ SK.Game = (function () {
     });
   }
 
+  function anyHeld(set) {
+    for (var c in set) if (input.keys[c]) return true;
+    return false;
+  }
+
+  /** 눌려 있는 방향 키의 벡터를 모두 더한다(축마다 -1..1로 묶어서) */
   function syncKeyDir() {
     if (padActive) return;                 // 조이스틱 입력이 우선
-    input.dx = (input.keys.right ? 1 : 0) - (input.keys.left ? 1 : 0);
-    input.dy = (input.keys.down ? 1 : 0) - (input.keys.up ? 1 : 0);
+    var x = 0, y = 0;
+    for (var code in KEYDIR) {
+      if (!input.keys[code]) continue;
+      x += KEYDIR[code][0];
+      y += KEYDIR[code][1];
+    }
+    input.dx = Math.max(-1, Math.min(1, x));
+    input.dy = Math.max(-1, Math.min(1, y));
   }
 
   /* =========================================================
