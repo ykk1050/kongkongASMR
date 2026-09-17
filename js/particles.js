@@ -26,7 +26,7 @@ SK.Particles = (function () {
     keycap: { hue: 232, light: 86, ring: 'rgba(223,228,255,', word: '톡', fx: 'press' },
     cotton: { hue: 336, light: 88, ring: 'rgba(255,201,222,', word: '포옥', fx: 'puff' },
     jelly: { hue: 156, light: 76, ring: 'rgba(142,240,192,', word: '통', fx: 'jiggle' },
-    leaf: { hue: 32, light: 66, ring: 'rgba(255,178,103,', word: '바스락', fx: 'chunk' },
+    leaf: { hue: 32, light: 66, ring: 'rgba(255,178,103,', word: '바스락', fx: 'leafFly' },
     bubble: { hue: 196, light: 82, ring: 'rgba(168,232,255,', word: '뽁', fx: 'pop' },
     wood: { hue: 30, light: 76, ring: 'rgba(232,201,160,', word: '탁', fx: 'press' },
     slime: { hue: 266, light: 80, ring: 'rgba(217,196,255,', word: '찌걱', fx: 'goo' },
@@ -167,18 +167,64 @@ SK.Particles = (function () {
       }
     },
 
-    /* 모래: 아주 작은 알갱이가 낮게 흩어진다 */
+    /* 모래: 알갱이가 튀고, 그 위로 **고운 가루가 피어오른다**.
+     *
+     *  알갱이(무거움)와 가루(가벼움)는 물리가 반대다. 알갱이는 포물선을 그리며
+     *  금방 떨어지고, 가루는 거의 뜬 채로 옆으로 번지며 천천히 사라진다.
+     *  둘을 같은 속도로 뿌리면 "점이 흩어진다"로만 보이고 모래처럼 보이지 않는다.
+     */
     grain: function (gx, gy, P, i, power, s) {
-      var n = 16 + Math.round(i * 16);
+      // 1) 튀어 오르는 알갱이
+      var n = 20 + Math.round(i * 22) + (power > 1 ? 14 : 0);
       for (var k = 0; k < n; k++) {
-        var a = Math.random() * 6.2832, sp = rnd(0.008, 0.032) * s;
+        var a = Math.random() * 6.2832, sp = rnd(0.008, 0.036) * s;
         push({
           type: 'dot', gx: gx, gy: gy, gz: 0.02,
-          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(0.01, 0.045),
-          gravity: -0.2, life: rnd(0.35, 0.7), size: rnd(1, 2.4),
-          color: 'hsla(' + P.hue + ',' + (60 + (k % 3) * 12) + '%,' + P.light + '%,', alpha: 0.85
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(0.012, 0.05),
+          gravity: -0.2, life: rnd(0.35, 0.75), size: rnd(1, 2.6),
+          color: 'hsla(' + P.hue + ',' + (60 + (k % 3) * 12) + '%,' + (P.light - (k % 2) * 14) + '%,',
+          alpha: 0.9
         });
       }
+      // 2) 피어오르는 가루 — 발밑에서 바깥으로 낮게 번진다
+      var m = 7 + Math.round(i * 7) + (power > 1 ? 5 : 0);
+      for (var q = 0; q < m; q++) {
+        var da = Math.random() * 6.2832, dsp = rnd(0.006, 0.019) * s;
+        push({
+          type: 'puff', gx: gx, gy: gy, gz: rnd(0.01, 0.06),
+          vx: Math.cos(da) * dsp, vy: Math.sin(da) * dsp * 0.6, vz: rnd(0.004, 0.016),
+          gravity: -0.012, life: rnd(0.75, 1.35), size: rnd(11, 26),
+          color: 'hsla(' + P.hue + ',52%,' + (P.light + 4) + '%,', alpha: 0.4
+        });
+      }
+      // 3) 바닥을 스치는 납작한 먼지 고리
+      ring(gx, gy, { size: 92 + i * 60, life: 0.5, width: 8, gz: 0.012,
+                     color: 'hsla(' + P.hue + ',48%,' + (P.light + 6) + '%,' });
+    },
+
+    /* 낙엽: 잎사귀가 흩날린다.
+     *
+     *  파편(chunk)으로 뿌리면 "부스러기"지 낙엽이 아니다. 잎은 넓고 가벼워서
+     *  공기에 얹혀 **좌우로 팔랑이며** 천천히 내려앉는다 — 그 팔랑임(sway)이
+     *  잎으로 보이게 만드는 거의 전부다.
+     */
+    leafFly: function (gx, gy, P, i, power, s) {
+      var hues = [28, 38, 16, 46, 8];
+      var n = 9 + Math.round(i * 8) + (power > 1 ? 6 : 0);
+      for (var k = 0; k < n; k++) {
+        var a = Math.random() * 6.2832, sp = rnd(0.05, 0.135) * s;
+        push({
+          type: 'leaf', gx: gx, gy: gy, gz: rnd(0.05, 0.16),
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(0.05, 0.11),
+          gravity: -0.06,                        // 파편보다 훨씬 천천히 떨어진다
+          life: rnd(1.0, 1.8), size: rnd(9, 16),
+          rot: Math.random() * 6.28, spin: rnd(-5, 5),
+          sway: rnd(9, 20), swayPhase: Math.random() * 6.28,
+          color: 'hsla(' + hues[k % hues.length] + ',' + rnd(70, 92) + '%,' + rnd(48, 68) + '%,'
+        });
+      }
+      // 마른 잎이 부서지며 나오는 잔부스러기
+      IMPACT.chunk(gx, gy, P, i * 0.45, 1, s * 0.7);
     },
 
     /* 유리: 십자 섬광 + 반짝이 */
@@ -225,9 +271,76 @@ SK.Particles = (function () {
     }
   }
 
+  /* =========================================================
+   *  에어캡 — 알이 하나씩 터진다
+   *
+   *  다른 소모성 타일은 '금이 가고 부서진다'가 맞지만, 뽁뽁이는 **시트가 깨지는 게
+   *  아니라 알이 터진다**. 균열선·파편·타일 조각을 쓰면 비닐이 유리처럼 보인다.
+   *  그래서 에어캡만 따로: 터지는 알의 자리에서 공기가 확 빠지고, 비닐 조각이
+   *  작게 튀고, 그 자리에 주름만 남는다.
+   * ======================================================= */
+
+  /** 타일 윗면에서 k번째 돔이 놓인 화면 오프셋(px) */
+  function bubbleCellOffset(k) {
+    var cells = (window.SK && SK.Tiles && SK.Tiles.BUBBLE_CELLS) || [[0, 0]];
+    var c = cells[k % cells.length];
+    var hw = SK.Iso.TW / 2, hh = SK.Iso.TH / 2;
+    return { ox: (c[0] - c[1]) * hw * 0.3, oy: (c[0] + c[1]) * hh * 0.3 };
+  }
+
+  /**
+   * from..to-1 번 돔을 터뜨린다.
+   * @param {number} strength 0~1 — 클수록 세게, 조각도 많이
+   */
+  function bubblePop(gx, gy, from, to, strength) {
+    var st = strength == null ? 1 : strength;
+    for (var k = from; k < to; k++) {
+      var o = bubbleCellOffset(k);
+      var delay = (k - from) * 0.045;            // 알들이 연달아 뽁-뽁-뽁
+
+      // 1) 공기가 빠지며 퍼지는 납작한 고리 — '터짐'의 핵심
+      push({
+        type: 'ring', gx: gx, gy: gy, gz: 0.05, ox: o.ox, oy: o.oy,
+        delay: delay, life: 0.34, size: 40 + st * 16, width: 3.2,
+        color: 'rgba(214,244,255,'
+      });
+      // 2) 순간 번쩍이는 흰 점 — 알이 꺼지는 찰나
+      push({
+        type: 'dot', gx: gx, gy: gy, gz: 0.05, ox: o.ox, oy: o.oy,
+        delay: delay, life: 0.13, size: 7 + st * 3,
+        color: 'rgba(255,255,255,', alpha: 0.95
+      });
+      // 3) 찢긴 비닐 조각 — 알 하나 크기 안에서만 작게 튄다
+      for (var q = 0; q < 5; q++) {
+        var a = Math.random() * 6.2832, sp = rnd(0.006, 0.018) * (0.6 + st * 0.6);
+        push({
+          type: 'shard', gx: gx, gy: gy, gz: 0.06, ox: o.ox, oy: o.oy,
+          delay: delay,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(0.02, 0.055),
+          gravity: -0.17, life: rnd(0.3, 0.6), size: rnd(2.5, 5),
+          rot: a, spin: rnd(-14, 14),
+          color: 'rgba(196,232,250,'
+        });
+      }
+      // 4) 빠져나가는 공기
+      push({
+        type: 'puff', gx: gx, gy: gy, gz: 0.07, ox: o.ox, oy: o.oy,
+        delay: delay, vz: 0.018, gravity: -0.01,
+        life: 0.42, size: 9, color: 'rgba(226,246,255,', alpha: 0.5
+      });
+    }
+  }
+
   /** 소모성 타일에 금이 갈 때 (부서지기 전 단계) */
-  function crackBits(gx, gy, mat, ratio) {
+  function crackBits(gx, gy, mat, ratio, popFrom, popTo) {
     var P = pal(mat);
+
+    // 에어캡은 금이 가는 게 아니라 이번에 밟힌 알들만 터진다
+    if (mat === 'bubble') {
+      bubblePop(gx, gy, popFrom || 0, popTo || 0, 0.5 + ratio * 0.5);
+      return;
+    }
+
     var n = 4 + Math.round(ratio * 5);
     for (var i = 0; i < n; i++) {
       var a = Math.random() * 6.2832, sp = rnd(0.008, 0.028);
@@ -246,6 +359,18 @@ SK.Particles = (function () {
   /** 소모성 타일이 완전히 부서질 때 */
   function shatter(gx, gy, mat, intensity) {
     var P = pal(mat);
+
+    // 에어캡은 깨지지 않는다 — 남은 알이 전부 연달아 터진다
+    if (mat === 'bubble') {
+      var cells = (window.SK && SK.Tiles && SK.Tiles.BUBBLE_CELLS) || [];
+      bubblePop(gx, gy, 0, cells.length, 1);
+      ring(gx, gy, { size: 150, life: 0.5, width: 3.4, color: P.ring });
+      text(gx, gy, 'POP-POP!', {
+        size: 22, color: 'hsl(' + P.hue + ',85%,' + P.light + '%)', life: 0.85, gz: 0.45
+      });
+      return;
+    }
+
     ring(gx, gy, { size: 150, life: 0.55, width: 4, color: P.ring });
     ring(gx, gy, { size: 250, life: 0.75, width: 2, color: 'rgba(255,255,255,' });
     tileBreak(gx, gy, mat);
@@ -374,6 +499,9 @@ SK.Particles = (function () {
       var t = p.age / p.life;
       var a = 1 - t;
       var s = proj(p.gx, p.gy, p.gz);
+      // 타일 안의 특정 지점(에어캡의 알 자리 등)에 붙이는 픽셀 오프셋
+      if (p.ox) s = { x: s.x + p.ox, y: s.y + (p.oy || 0) };
+      else if (p.oy) s = { x: s.x, y: s.y + p.oy };
 
       ctx.save();
       switch (p.type) {
@@ -394,6 +522,29 @@ SK.Particles = (function () {
           ctx.beginPath();
           ctx.ellipse(0, 0, p.size, p.size * 0.42, 0.4, 0, 6.2832);
           ctx.fill();
+          break;
+
+        /* 낙엽 — 잎맥까지 그린 잎사귀 하나. 팔랑임에 맞춰 옆으로 납작해진다
+           (뒤집히며 떨어지는 착시). 이 납작해짐이 없으면 그냥 도는 조각이다. */
+        case 'leaf':
+          var flip = Math.cos(p.age * 7 + (p.swayPhase || 0));
+          // 팔랑임은 위치 적분이 아니라 그릴 때의 픽셀 오프셋으로 준다 —
+          // 진폭을 눈에 보이는 단위(px)로 직접 정할 수 있다
+          ctx.translate(s.x + Math.sin(p.age * 6.5 + (p.swayPhase || 0)) * (p.sway || 0), s.y);
+          ctx.rotate(p.rot);
+          ctx.scale(1, 0.35 + Math.abs(flip) * 0.65);
+          ctx.fillStyle = p.color + a + ')';
+          ctx.beginPath();
+          ctx.moveTo(-p.size, 0);
+          ctx.quadraticCurveTo(0, -p.size * 0.62, p.size, 0);
+          ctx.quadraticCurveTo(0, p.size * 0.62, -p.size, 0);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(70,40,12,' + (a * 0.5) + ')';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(-p.size * 0.9, 0); ctx.lineTo(p.size * 0.9, 0);
+          ctx.stroke();
           break;
 
         case 'bubble':
@@ -567,7 +718,7 @@ SK.Particles = (function () {
     PALETTE: PALETTE, pal: pal,
     setProjector: setProjector,
     stepBurst: stepBurst, crackBits: crackBits, shatter: shatter, trail: trail,
-    tileBreak: tileBreak,
+    tileBreak: tileBreak, bubblePop: bubblePop,
     stars: stars, ring: ring, text: text, celebrate: celebrate,
     solveMark: solveMark,
     update: update, draw: draw, clear: clear, count: count

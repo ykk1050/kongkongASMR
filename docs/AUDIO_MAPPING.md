@@ -125,7 +125,7 @@ Q를 높이면 휘파람이 되므로 절대 올리지 마세요.
 | 키 | 언제 울리나 | 합성 설계 | 녹음 가이드 |
 |---|---|---|---|
 | `step_keycap` | 키캡 타일을 밟을 때 | 딸깍(4ms) → 8ms 뒤 바닥 침 205Hz 모달 38ms | 기계식 키보드 1타. 60ms 이내로 짧게 자를 것 |
-| `step_cotton` | 솜 타일 | 780Hz 로우패스 노이즈 110ms + 104→62Hz 사인 | 쿠션·이불을 손바닥으로 누르는 소리 |
+| `step_cotton` | 솜 타일 | 620Hz 로우패스 + 76Hz 모달 + **520Hz 중역 몸통** + 천 결 알갱이 16알 | 쿠션·이불을 손바닥으로 누르는 소리 |
 | `step_jelly` | 젤리 블록 | 300→98Hz 피치 글라이드 + 되돌아오는 116→168Hz | 젤리/실리콘 패드를 눌렀다 떼는 소리 |
 | `step_leaf` | 낙엽 (소모성) | 2.6~6.8kHz 하이패스 노이즈 5~9개를 120ms에 무작위 분산 | 마른 낙엽 한 줌을 쥐는 소리. **한 걸음만** — 6.2절 참고 |
 | `step_bubble` | 에어캡 (소모성) | 820→2400Hz 사인 28ms + 3.4kHz 하이패스 + 220→150Hz 꼬리 | 뽁뽁이 한 알. 클리핑 없이 피크 −6dBFS |
@@ -379,9 +379,13 @@ python tools/prep-steps.py normalize --apply
 |---|---|
 | `step(mat)` | `Particles.stepBurst()` — 재질 색 파문 링 + 먼지, 타일 표면 발광(`t.flash`) |
 | `step(..., stomp)` | 위 + 흰색 큰 링 + `쿵!` 텍스트 + 카메라 흔들림 |
-| `crack(mat, stage)` | `Particles.crackBits()` + 타일 위 균열선 누적, 에어캡은 알이 하나씩 사라짐 |
+| `crack(mat, stage)` | `Particles.crackBits()` + 타일 위 균열선 누적 |
+| `crack('bubble', …)` | `Particles.bubblePop()` — **금이 가지 않는다.** 밟을 때마다 알 2개가 제자리에서 터진다 |
 | (정답) | `Particles.solveMark()` — 정답 칸에 찍히는 도장. 소리 없음 |
-| `shatter(mat)` | `Particles.shatter()` — 파편 + `CRUNCH!` / `POP-POP!` + 타일 소멸 |
+| `shatter(mat)` | `Particles.shatter()` — 파편 + `CRUNCH!` + 타일 소멸 |
+| `shatter('bubble')` | 남은 알이 연달아 터지고 **납작해진 비닐 시트만 남는다**(구멍·파편 없음) |
+| `step('sand')` | `IMPACT.grain` — 튀는 알갱이 + **피어오르는 가루** + 바닥을 스치는 먼지 고리 |
+| `step('leaf')` | `IMPACT.leafFly` — **잎사귀가 팔랑이며 날린다**(sway) + 잔부스러기 |
 | `whoosh(power)` | `Particles.trail()` — 도약 궤적 |
 | (문제 완성) | `Particles.celebrate()` + 정답 칸마다 0.11초 간격으로 도장이 연달아 찍힘 |
 | `wrong()` | 붉은 링 + `THUD…` + 화면 흔들림 + 캐릭터 멈칫 |

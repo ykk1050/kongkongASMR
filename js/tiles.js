@@ -93,6 +93,11 @@ SK.Tiles = (function () {
     }
   };
 
+  /* 에어캡 알의 배치 — 타일 그림과 파티클이 **같은 자리**를 써야 한다.
+     따로 두면 터지는 연출이 알에서 몇 픽셀 빗나가 붕 뜬다. */
+  var BUBBLE_CELLS = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+  var BUBBLE_PER_STEP = 2;          // 한 번 밟을 때 터지는 알 수
+
   function material(key) { return MATERIALS[key] || MATERIALS.wood; }
   function isConsumable(key) { return material(key).klass === 'consumable'; }
 
@@ -144,12 +149,16 @@ SK.Tiles = (function () {
     if (m.klass === 'consumable') {
       if (t.broken >= 1) return { sound: 'hollow', stage: 0, total: m.durability, gain: 0.3 };
 
+      var wasPopped = t.damage * BUBBLE_PER_STEP;      // 에어캡: 지금까지 터진 알 수
       t.damage = Math.min(m.durability, t.damage + (power || 1));
       t.press = Math.min(1, t.press + 0.35);
       t.pressVel = -4 * (0.5 + intensity);
       buildCracks(t);
 
-      t.tilt = (t.damage / m.durability) * 0.06 * (Math.random() < 0.5 ? -1 : 1);
+      // 에어캡은 시트가 기울지 않는다 — 알만 꺼질 뿐
+      t.tilt = t.mat === 'bubble'
+        ? 0
+        : (t.damage / m.durability) * 0.06 * (Math.random() < 0.5 ? -1 : 1);
 
       if (t.damage >= m.durability) {
         t.broken = 1;
@@ -157,7 +166,8 @@ SK.Tiles = (function () {
         SK.Particles.shatter(t.i, t.j, t.mat, intensity);
         return { sound: 'shatter', stage: m.durability, total: m.durability, gain: 1 };
       }
-      SK.Particles.crackBits(t.i, t.j, t.mat, t.damage / m.durability);
+      SK.Particles.crackBits(t.i, t.j, t.mat, t.damage / m.durability,
+        wasPopped, Math.min(BUBBLE_CELLS.length, t.damage * BUBBLE_PER_STEP));
       return { sound: 'crack', stage: t.damage, total: m.durability, gain: 0.8 };
     }
 
@@ -168,6 +178,8 @@ SK.Tiles = (function () {
 
   /** 균열 선을 미리 만들어 매 프레임 흔들리지 않게 고정 */
   function buildCracks(t) {
+    // 에어캡에는 금이 가지 않는다 — 알이 터질 뿐이다
+    if (t.mat === 'bubble') { t.cracks = null; return; }
     var n = t.damage * 3, lines = [];
     for (var k = 0; k < n; k++) {
       var a = t.seed + k * 1.9;
@@ -225,7 +237,8 @@ SK.Tiles = (function () {
     var sink = t.press * Iso.TZ * 0.75 * m.squish + t.broken * thick * 0.9;
     var topY = sy - thick + sink;
     var hw = Iso.TW / 2, hh = Iso.TH / 2;
-    var alpha = 1 - t.broken * 0.72;
+    // 에어캡은 '없어지는' 게 아니라 알만 꺼진 채 시트가 남으므로 덜 흐려진다
+    var alpha = 1 - t.broken * (t.mat === 'bubble' ? 0.18 : 0.72);
 
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -538,8 +551,8 @@ SK.Tiles = (function () {
       ctx.fillStyle = 'rgba(255,255,255,.18)';
       diamond(ctx, cx, cy, 0.88, 0.88); ctx.fill();
 
-      var cells = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
-      var popped = t.damage * 2;
+      var cells = BUBBLE_CELLS;
+      var popped = t.damage * BUBBLE_PER_STEP;
       for (var k = 0; k < cells.length; k++) {
         var bx = cx + (cells[k][0] - cells[k][1]) * hw * 0.3;
         var by = cy + (cells[k][0] + cells[k][1]) * hh * 0.3;
@@ -949,6 +962,11 @@ SK.Tiles = (function () {
    */
   function drawHole(ctx, t, m, sx, sy, hw, hh, alpha) {
     var fade = Math.min(1, (t.broken - 0.55) / 0.45);
+
+    /* 에어캡은 **깨지지 않는다**. 알이 전부 터졌을 뿐이라 시트는 그대로 남는다.
+       여기서 어두운 구멍과 삐죽한 파편을 그리면 비닐이 유리처럼 보인다. */
+    if (t.mat === 'bubble') { drawPoppedSheet(ctx, t, m, sx, sy, hw, hh, fade); return; }
+
     ctx.save();
     ctx.globalAlpha = fade;
 
@@ -1005,6 +1023,44 @@ SK.Tiles = (function () {
       ctx.ellipse(mx, my, 12, 6.5, 0, 0, 6.2832);
       ctx.fill();
     }
+    ctx.restore();
+  }
+
+  /** 알이 전부 터진 에어캡 — 납작하게 주저앉은 비닐 시트와 주름만 남는다 */
+  function drawPoppedSheet(ctx, t, m, sx, sy, hw, hh, fade) {
+    ctx.save();
+    ctx.globalAlpha = 1;
+
+    // 바람 빠진 시트 — 가운데가 살짝 꺼지고 가장자리가 들린다
+    var g = ctx.createRadialGradient(sx, sy, 2, sx, sy, hw);
+    g.addColorStop(0, 'rgba(150,196,224,.95)');
+    g.addColorStop(0.7, 'rgba(196,228,246,.95)');
+    g.addColorStop(1, 'rgba(226,244,255,.95)');
+    ctx.fillStyle = g;
+    diamond(ctx, sx, sy, 0.92, 0.92); ctx.fill();
+    ctx.strokeStyle = 'rgba(96,152,186,.75)'; ctx.lineWidth = 1.6;
+    diamond(ctx, sx, sy, 0.92, 0.92); ctx.stroke();
+
+    // 터진 알 자국 — 알이 있던 자리마다 쭈글쭈글한 주름
+    ctx.strokeStyle = 'rgba(48,104,138,.8)';
+    ctx.lineWidth = 1.5;
+    for (var k = 0; k < BUBBLE_CELLS.length; k++) {
+      var c = BUBBLE_CELLS[k];
+      var bx = sx + (c[0] - c[1]) * hw * 0.3;
+      var by = sy + (c[0] + c[1]) * hh * 0.3;
+      ctx.beginPath(); ctx.ellipse(bx, by, 9, 4.4, 0, 0, 6.2832); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(bx - 6, by - 1.2); ctx.lineTo(bx + 2, by + 1.8);
+      ctx.lineTo(bx + 6, by - 1.6);
+      ctx.stroke();
+    }
+
+    // 비닐다운 미끈한 반사 한 줄
+    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sx - hw * 0.5, sy - hh * 0.12);
+    ctx.quadraticCurveTo(sx, sy - hh * 0.4, sx + hw * 0.45, sy - hh * 0.05);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -1155,6 +1211,7 @@ SK.Tiles = (function () {
     thicknessOf: thicknessOf,
     isSolid: isSolid,
     reset: reset,
+    BUBBLE_CELLS: BUBBLE_CELLS,
     setIso: setIso
   };
 })();

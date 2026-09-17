@@ -41,7 +41,8 @@ SK.Game = (function () {
   var phaseTimer = 0;
   var ui = {};
 
-  var input = { dx: 0, dy: 0, jump: false, jumpHeld: false, keys: Object.create(null) };
+  var input = { dx: 0, dy: 0, jump: false, jumpHeld: false,
+                keys: Object.create(null), pressed: Object.create(null) };
 
   /* =========================================================
    *  좌표 변환 — 타일 간격을 반영한 격자 → 화면
@@ -162,15 +163,23 @@ SK.Game = (function () {
    * ======================================================= */
   /* 키 하나가 곧 화면 방향 벡터다.
    *
-   *  ⚠ **대각선 전용 키가 왜 필요한가**
-   *  W·A·S·D 만 있으면 대각선은 두 키를 함께 눌러야 하고, 여기에 점프까지 더하면
-   *  `W`+`A`+`Space` 로 **세 키 동시입력**이 된다. 값싼 멤브레인 키보드는 3키 롤오버를
-   *  전부 받아 주지 못하고, 어느 조합이 막히는지는 키 매트릭스 배선마다 다르다.
-   *  그래서 "오른쪽 위는 되는데 왼쪽 위만 안 된다" 같은 일이 실제로 생긴다.
+   *  ⚠ **대각선을 동시입력에 기대지 않는다**
+   *  대각선 + 점프는 `↑`+`←`+`Space` 로 세 키 동시입력이다. 값싼 키보드는 3키
+   *  롤오버를 전부 받아 주지 못하고, 막히는 조합은 키 매트릭스 배선마다 다르다.
+   *  특히 방향키 네 개는 서로 붙어 배선돼 있어 자주 걸린다 — "WASD로는 되는데
+   *  방향키로는 대각선이 안 된다"가 실제 증상이다. 도착하지 않은 키 이벤트는
+   *  JS에서 되살릴 수 없으므로, 애초에 동시에 누르지 않아도 되게 만든다.
    *
-   *  Q·E·Z·C(그리고 넘패드 7·9·1·3)는 **키 하나가 대각선 하나**라서,
-   *  점프까지 합쳐도 두 키면 된다. 하드웨어가 무엇이든 8방향이 다 나온다.
+   *  대비책이 셋이다.
+   *   1) Q·E·Z·C(넘패드 7·9·1·3) — **키 하나가 대각선 하나**
+   *   2) COMBINE_MS — 방금 눌렀던 방향 키는 떼었어도 잠깐 함께 눌린 것으로 친다.
+   *      `↑` 톡 → `←` 톡 처럼 **번갈아 눌러도** 대각선이 된다.
+   *   3) Player 의 AIM_HOLD — 방향을 떼고 점프해도 조준이 남아 있다.
+   *  셋을 합치면 한 번에 눌리는 키가 하나여도 대각선으로 뛸 수 있다.
    */
+  /* 방금 눌린 방향 키를 '아직 눌려 있는 것'으로 쳐 주는 시간(ms).
+     길면 따로 누른 두 방향이 멋대로 합쳐지고, 짧으면 번갈아 누르기가 안 먹는다. */
+  var COMBINE_MS = 260;
   var KEYDIR = {
     ArrowUp: [0, -1], KeyW: [0, -1],
     ArrowDown: [0, 1], KeyS: [0, 1],
@@ -195,7 +204,9 @@ SK.Game = (function () {
       }
       if (!KEYDIR[e.code]) return;
       e.preventDefault();
+      if (!input.keys[e.code]) input.pressed[e.code] = performance.now();
       input.keys[e.code] = true;
+      if (keyLog) logKey('down', e.code);
       syncKeyDir();
     });
     window.addEventListener('keyup', function (e) {
@@ -209,10 +220,12 @@ SK.Game = (function () {
       if (!KEYDIR[e.code]) return;
       e.preventDefault();
       input.keys[e.code] = false;
+      if (keyLog) logKey('up  ', e.code);
       syncKeyDir();
     });
     window.addEventListener('blur', function () {
       input.keys = Object.create(null);
+      input.pressed = Object.create(null);
       input.jumpHeld = false;
       syncKeyDir();
     });
@@ -223,12 +236,27 @@ SK.Game = (function () {
     return false;
   }
 
-  /** 눌려 있는 방향 키의 벡터를 모두 더한다(축마다 -1..1로 묶어서) */
+  /* 키가 실제로 브라우저에 도착하는지 확인하는 진단용 로그.
+     콘솔에서 SK.Game.debug.keyLog(true) 로 켠다. */
+  var keyLog = false;
+  function logKey(kind, code) {
+    if (!window.console) return;
+    var held = [];
+    for (var c in KEYDIR) if (input.keys[c]) held.push(c);
+    console.log('[key] ' + kind + ' ' + code + '   held=[' + held.join(' ') + ']');
+  }
+
+  /** 대각선 확정에 쓰는 '조준 버퍼'를 비운다 — 점프한 뒤에는 새로 잡아야 한다 */
+  function clearKeyCombine() { input.pressed = Object.create(null); }
+
+  /** 눌려 있는(또는 방금 눌렸던) 방향 키의 벡터를 모두 더한다(축마다 -1..1로 묶어서) */
   function syncKeyDir() {
     if (padActive) return;                 // 조이스틱 입력이 우선
-    var x = 0, y = 0;
+    var x = 0, y = 0, tnow = performance.now();
     for (var code in KEYDIR) {
-      if (!input.keys[code]) continue;
+      var on = input.keys[code] ||
+        (input.pressed[code] && tnow - input.pressed[code] < COMBINE_MS);
+      if (!on) continue;
       x += KEYDIR[code][0];
       y += KEYDIR[code][1];
     }
@@ -510,12 +538,18 @@ SK.Game = (function () {
     }
 
     // 점프 입력은 '눌림 유지' 방식 — 조준을 먼저 잡고 눌러도, 누른 채 조준을 바꿔도 뛴다
+    // 조준 버퍼(COMBINE_MS)는 키 이벤트가 없어도 만료돼야 하므로 매 프레임 다시 센다
+    syncKeyDir();
+
     var wantJump = input.jump || input.jumpHeld;
+    var wasHopping = player.hopping;
     SK.Player.update(player, { dx: input.dx, dy: input.dy, jump: wantJump }, dt, worldApi, {
       onTakeoff: function (power) { SK.Audio.whoosh(power, panOf(player.x, player.y)); },
       onLand: function (intensity, power, i, j) { land(intensity, power, i, j); }
     });
     input.jump = false;
+    // 뛰고 나면 버퍼를 비운다 — 안 그러면 직전 방향이 다음 조준에 섞여 든다
+    if (!wasHopping && player.hopping) clearKeyCombine();
 
     // 점프 궤적 (소리 ↔ 시각 연결)
     if (player.hopping && Math.random() < 0.55) {
@@ -580,8 +614,9 @@ SK.Game = (function () {
       case 'shatter':
         // 시각: Tiles.stomp 안에서 Particles.shatter 가 이미 터졌다
         SK.Audio.shatter(mat, { pan: pan, depth: depth });
-        cam.shake = Math.max(cam.shake, 0.55);
-        setFlash(0.32, SK.Particles.pal(mat).hue);
+        // 에어캡은 '부서지는' 게 아니라 알이 터지는 것이라 충격 연출을 줄인다
+        cam.shake = Math.max(cam.shake, mat === 'bubble' ? 0.22 : 0.55);
+        setFlash(mat === 'bubble' ? 0.14 : 0.32, SK.Particles.pal(mat).hue);
         break;
       case 'crack':
         SK.Audio.crack(mat, res.stage, res.total, { pan: pan, depth: depth });
@@ -874,6 +909,32 @@ SK.Game = (function () {
       release: function () { input.dx = 0; input.dy = 0; },
       safeRect: safeRect,
       /** 지금 조준 표시가 켜진 타일 수 (0 또는 1) */
+      /** 임의의 칸 재질 읽기/바꾸기 — 특정 재질의 연출을 확인할 때 쓴다 */
+      matOf: function (i, j) { var t = getTile(i, j); return t && t.mat; },
+      setMat: function (i, j, mat) {
+        var t = getTile(i, j);
+        if (t) { t.mat = mat; SK.Tiles.reset(t); }
+        return t && t.mat;
+      },
+      input: function () {
+        var held = [], buf = [], tnow = performance.now();
+        for (var c in KEYDIR) {
+          if (input.keys[c]) held.push(c);
+          if (input.pressed[c] && tnow - input.pressed[c] < COMBINE_MS) {
+            buf.push(c + '(' + Math.round(tnow - input.pressed[c]) + 'ms)');
+          }
+        }
+        var d = player && player.aimDir;
+        return {
+          dx: input.dx, dy: input.dy, jump: input.jump, jumpHeld: input.jumpHeld,
+          held: held, buffered: buf,
+          aimDir: d ? (d.di + ',' + d.dj) : null,
+          aimHold: player ? Math.round((player.aimHold || 0) * 1000) : 0,
+          hopping: player ? player.hopping : null,
+          cooldown: player ? +(player.cooldown || 0).toFixed(3) : null
+        };
+      },
+      keyLog: function (on) { keyLog = on !== false; return keyLog ? '켬 — 키를 눌러 보세요' : '끔'; },
       aimCount: function () {
         var n = 0;
         for (var k = 0; k < tiles.length; k++) if (tiles[k].aim > 0.5) n++;
