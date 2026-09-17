@@ -210,7 +210,10 @@ SK.Game = (function () {
   var COMBINE_MS = 400;      // 같은 묶음으로 이어지는 키 사이 최대 간격
   var COMBO_HOLD_MS = 350;   // 마지막 입력 뒤 묶음이 유지되는 시간
 
-  var combo = { codes: Object.create(null), lastAt: -1e9 };
+  /* ⚠ 이름 주의 — 이 파일에는 점수 배수용 `combo` 가 이미 있다(위쪽 var 선언).
+     같은 이름을 쓰면 정답을 맞힌 순간 `combo = 숫자` 가 이 객체를 덮어써서
+     방향 입력이 통째로 죽는다. 실제로 그렇게 망가뜨린 적이 있다. */
+  var dirCombo = { codes: Object.create(null), lastAt: -1e9 };
   var KEYDIR = {
     ArrowUp: [0, -1], KeyW: [0, -1],
     ArrowDown: [0, 1], KeyS: [0, 1],
@@ -256,9 +259,9 @@ SK.Game = (function () {
       if (!input.keys[e.code]) {                 // OS 자동 반복은 세지 않는다
         var tnow = performance.now();
         // 앞 키와의 간격이 벌어졌으면 새 묶음을 시작한다
-        if (tnow - combo.lastAt > COMBINE_MS) combo.codes = Object.create(null);
-        combo.codes[e.code] = true;
-        combo.lastAt = tnow;
+        if (tnow - dirCombo.lastAt > COMBINE_MS) dirCombo.codes = Object.create(null);
+        dirCombo.codes[e.code] = true;
+        dirCombo.lastAt = tnow;
         if (lastTap.code === e.code && tnow - lastTap.at < TAP_JUMP_MS) {
           requestJump();                         // 톡톡 → 점프
           lastTap.code = null;                   // 3연타가 연속 점프로 번지지 않게
@@ -286,8 +289,8 @@ SK.Game = (function () {
     });
     window.addEventListener('blur', function () {
       input.keys = Object.create(null);
-      combo.codes = Object.create(null);
-      combo.lastAt = -1e9;
+      dirCombo.codes = Object.create(null);
+      dirCombo.lastAt = -1e9;
       input.jumpHeld = false;
       lastTap.code = null;
       syncKeyDir();
@@ -314,8 +317,8 @@ SK.Game = (function () {
   function clearKeyCombine() {
     var keep = Object.create(null), any = false;
     for (var code in KEYDIR) if (input.keys[code]) { keep[code] = true; any = true; }
-    combo.codes = keep;
-    combo.lastAt = any ? performance.now() : -1e9;
+    dirCombo.codes = keep;
+    dirCombo.lastAt = any ? performance.now() : -1e9;
   }
 
   /** 눌려 있는 키 + 살아 있는 묶음의 벡터를 모두 더한다(축마다 -1..1) */
@@ -326,12 +329,12 @@ SK.Game = (function () {
     // (동시입력이 많을 때 키보드가 흘리는 일이 있다) 조준이 곧바로 무너지지 않고,
     // 대각선을 잡은 채 점프 키를 누르는 그 짧은 순간이 지켜진다.
     var holding = false;
-    for (var h in KEYDIR) if (input.keys[h]) { combo.codes[h] = true; holding = true; }
-    if (holding) combo.lastAt = tnow;
+    for (var h in KEYDIR) if (input.keys[h]) { dirCombo.codes[h] = true; holding = true; }
+    if (holding) dirCombo.lastAt = tnow;
 
-    var alive = tnow - combo.lastAt < COMBO_HOLD_MS;
+    var alive = tnow - dirCombo.lastAt < COMBO_HOLD_MS;
     for (var code in KEYDIR) {
-      if (!input.keys[code] && !(alive && combo.codes[code])) continue;
+      if (!input.keys[code] && !(alive && dirCombo.codes[code])) continue;
       x += KEYDIR[code][0];
       y += KEYDIR[code][1];
     }
@@ -585,11 +588,21 @@ SK.Game = (function () {
   /* =========================================================
    *  루프
    * ======================================================= */
+  var loopErrors = 0;
+
   function loop(ts) {
     var dt = Math.min(0.05, (ts - lastT) / 1000);
     lastT = ts; now = ts / 1000;
-    update(dt);
-    render();
+    /* 한 프레임에서 예외가 나면 requestAnimationFrame 재예약까지 건너뛰어
+       **게임이 통째로 멈춘다**. 실제로 입력 코드의 변수 이름 충돌 하나로 그렇게
+       얼어붙은 적이 있다 — 화면은 멀쩡해 보이는데 키가 안 먹는 상태가 된다.
+       예외를 여기서 막고 루프는 계속 돌린다. 처음 몇 번은 콘솔에 남긴다. */
+    try {
+      update(dt);
+      render();
+    } catch (err) {
+      if (loopErrors++ < 3 && window.console) console.error('[loop]', err);
+    }
     requestAnimationFrame(loop);
   }
 
@@ -999,10 +1012,10 @@ SK.Game = (function () {
       },
       input: function () {
         var held = [], buf = [], tnow = performance.now();
-        var alive = tnow - combo.lastAt < COMBO_HOLD_MS;
+        var alive = tnow - dirCombo.lastAt < COMBO_HOLD_MS;
         for (var c in KEYDIR) {
           if (input.keys[c]) held.push(c);
-          if (alive && combo.codes[c]) buf.push(c);
+          if (alive && dirCombo.codes[c]) buf.push(c);
         }
         var d = player && player.aimDir;
         return {
