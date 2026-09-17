@@ -233,23 +233,195 @@ SK.Game = (function () {
     }
     quizTiles = [];
 
-    var cells = pickCells();
-    var items = SK.Quiz.plan(q, cells.length);
+    /* 글자 타일은 밟는 순간 판정되는 칸이라 **지나가는 길이 될 수 없다**.
+       글자로 판을 거의 덮으면 다음 글자로 건너갈 때 반드시 오답을 밟게 되고,
+       진행이 계속 처음으로 돌아가 문제를 영영 풀 수 없다. 판이 작을수록(휴대폰
+       4x4) 바로 이 상황이 된다. 그래서 절반쯤은 디딤 타일로 남겨 길을 둔다. */
+    var free = pickCells();
+    var budget = Math.max(q.sequence.length, Math.floor(free.length * 0.55));
+    var items = SK.Quiz.plan(q, budget);
+    var correct = items.filter(function (it) { return it.correct; })
+      .sort(function (a, b) { return a.order - b.order; });
 
-    for (var n = 0; n < items.length && n < cells.length; n++) {
-      var c = cells[n], it = items[n];
-      var t = getTile(c.i, c.j);
-      if (!t) continue;
-      t.label = it.label;
-      t.payload = it.token;
-      t.role = 'seq';
-      t.order = it.order;
-      t.correct = it.correct;
-      t.state = 'idle';
-      t.mat = q.material;
-      quizTiles.push(t);
+    /* 먼저 놓은 글자가 뒤에 놓을 글자의 길을 막아 버리는 배치가 나온다.
+       한 번 막히면 그대로 굳으므로, 칸을 다시 섞어 몇 번이고 새로 시도한다. */
+    var ok = false;
+    for (var attempt = 0; attempt < 14 && !ok; attempt++) {
+      clearAllLabels();
+      var cells = SK.Quiz.shuffle(pickCells());
+      ok = true;
+      for (var n = 0; n < correct.length && ok; n++) {
+        if (!placeItem(correct[n], cells, q)) ok = false;
+      }
+      if (ok && !roadOk()) ok = false;
+    }
+
+    // 끝내 자리를 못 찾으면(많이 닳은 판) 길 조건을 접고라도 정답은 올려 둔다
+    if (!ok) {
+      clearAllLabels();
+      var any = pickCells();
+      for (var f = 0; f < correct.length; f++) placeItem(correct[f], any, q, true);
+      openLetterPath();
+    }
+
+    // 오답은 길을 막지 않는 자리에만 — 자리가 없으면 그냥 놓지 않는다
+    var spots = SK.Quiz.shuffle(pickCells());
+    for (var d = 0; d < items.length; d++) {
+      if (!items[d].correct) placeItem(items[d], spots, q);
     }
   }
+
+  function clearAllLabels() {
+    for (var k = quizTiles.length - 1; k >= 0; k--) stripLabel(quizTiles[k]);
+  }
+
+  /* =========================================================
+   *  "정답을 밟으러 갈 길"이 반드시 있어야 한다
+   *
+   *  글자 타일은 밟는 순간 판정이 난다. 그래서 다음 글자로 가는 도중에 다른
+   *  글자를 밟으면 오답이 되어 진행이 처음으로 돌아간다. 판이 작아지면(휴대폰
+   *  4x4) 글자가 판을 거의 덮어 버려서, **오답을 밟지 않고는 다음 글자로 갈 수
+   *  없는 판**이 만들어졌다 — 아무리 해도 답을 넣을 수 없었다.
+   *
+   *  그래서 규칙을 하나 세운다.
+   *    **글자가 없는 디딤 타일로 이어진 '길'이 하나 있고, 캐릭터와 모든 글자가
+   *      그 길에 맞닿아 있어야 한다.**
+   *  그러면 어느 글자에서든 길로 내려섰다가 다른 글자로 올라갈 수 있다. 도중에
+   *  틀려 진행이 리셋돼도, 서 있는 자리가 어디든 길을 따라 첫 글자로 갈 수 있다.
+   *  타일이 없는 칸(구멍)과 부서진 자리는 길이 될 수 없다.
+   * ======================================================= */
+
+  /** 글자가 없는 성한 타일들이 이루는 가장 큰 덩어리 — 이것이 '길'이다.
+      except 를 주면 그 타일은 없는 셈 친다(부서뜨려도 되는지 미리 볼 때). */
+  function roadCells(except) {
+    var seen = Object.create(null), best = null, DIRS = SK.Player.DIRS;
+    for (var k = 0; k < tiles.length; k++) {
+      var t0 = tiles[k];
+      if (t0 === except || t0.label || !SK.Tiles.isSolid(t0)) continue;
+      var key0 = t0.i + ',' + t0.j;
+      if (seen[key0]) continue;
+
+      var comp = Object.create(null), queue = [t0], n = 0;
+      seen[key0] = true; comp[key0] = true;
+      while (queue.length) {
+        var cur = queue.pop(); n++;
+        for (var d = 0; d < DIRS.length; d++) {
+          var ni = cur.i + DIRS[d].di, nj = cur.j + DIRS[d].dj, key = ni + ',' + nj;
+          if (seen[key]) continue;
+          var t = getTile(ni, nj);
+          if (!t || t === except || t.label || !SK.Tiles.isSolid(t)) continue;
+          seen[key] = true; comp[key] = true; queue.push(t);
+        }
+      }
+      if (!best || n > best.size) best = { cells: comp, size: n };
+    }
+    return best;
+  }
+
+  /** 이 칸이 길 위에 있거나 길과 맞닿아 있는가 (8방향) */
+  function touchesRoad(i, j, road) {
+    if (road.cells[i + ',' + j]) return true;
+    var DIRS = SK.Player.DIRS;
+    for (var d = 0; d < DIRS.length; d++) {
+      if (road.cells[(i + DIRS[d].di) + ',' + (j + DIRS[d].dj)]) return true;
+    }
+    return false;
+  }
+
+  /** 캐릭터와 모든 글자가 같은 길에 붙어 있는가 */
+  function roadOk() { return roadOkWithout(null); }
+
+  /**
+   * except 타일이 사라져도 길이 남아 있는가.
+   * 밟아서 부서질 때 이걸 먼저 본다 — 길을 끊어 버리는 타일은 부서지지 않고
+   * 금만 간 채로 버틴다. 부서진 뒤에 수습하는 것보다 확실하다.
+   */
+  function roadOkWithout(except) {
+    var road = roadCells(except);
+    if (!road) return false;
+    if (!touchesRoad(player.ci, player.cj, road)) return false;
+    for (var k = 0; k < quizTiles.length; k++) {
+      var t = quizTiles[k];
+      if (t === except) continue;              // 글자는 부서지면 옮겨 간다
+      if (!touchesRoad(t.i, t.j, road)) return false;
+    }
+    return true;
+  }
+
+  function stripLabel(t) {
+    var at = quizTiles.indexOf(t);
+    if (at >= 0) quizTiles.splice(at, 1);
+    t.label = null; t.payload = null; t.role = 'plain';
+    t.order = -1; t.correct = false; t.state = 'idle';
+    t.mat = ambientMat(t.i, t.j);
+  }
+
+  function putLabel(t, it, mat) {
+    t.label = it.label; t.payload = it.token; t.role = 'seq';
+    t.order = it.order; t.correct = it.correct; t.state = 'idle';
+    t.mat = mat;
+    quizTiles.push(t);
+  }
+
+  /**
+   * 글자 한 칸 놓기 — 놓아 본 뒤 길이 살아 있으면 확정, 막히면 무른다.
+   * force 면 길 조건을 접고라도 놓는다(정답 글자가 판에서 빠지는 것보다 낫다).
+   */
+  function placeItem(it, cells, q, force) {
+    var fallback = null;
+    for (var n = 0; n < cells.length; n++) {
+      var t = getTile(cells[n].i, cells[n].j);
+      if (!t || t.label || !SK.Tiles.isSolid(t)) continue;
+      if (!fallback) fallback = t;
+      putLabel(t, it, q.material);
+      if (roadOk()) return true;
+      stripLabel(t);
+    }
+    if (force && fallback) { putLabel(fallback, it, q.material); return true; }
+    return false;
+  }
+
+  /** 길을 막고 있는 오답을 지운다 — 오답은 없어도 문제가 성립한다 */
+  function clearBlockingDecoys() {
+    for (var k = quizTiles.length - 1; k >= 0; k--) {
+      if (roadOk()) return true;
+      if (!quizTiles[k].correct) stripLabel(quizTiles[k]);
+    }
+    return roadOk();
+  }
+
+  /** 길에 붙지 못한 글자를 길가 타일로 옮긴다 */
+  function moveLettersToRoad() {
+    for (var k = 0; k < quizTiles.length; k++) {
+      var road = roadCells();
+      if (!road) return false;
+      var t = quizTiles[k];
+      if (touchesRoad(t.i, t.j, road)) continue;
+
+      for (var n = 0; n < tiles.length; n++) {
+        var o = tiles[n];
+        if (o === t || o.label || !SK.Tiles.isSolid(o)) continue;
+        if (o.i === player.ci && o.j === player.cj) continue;
+        if (!touchesRoad(o.i, o.j, road)) continue;
+        o.label = t.label; o.payload = t.payload; o.mat = t.mat;
+        o.role = 'seq'; o.order = t.order; o.correct = t.correct; o.state = t.state;
+        quizTiles[k] = o;
+        t.label = null; t.payload = null; t.role = 'plain';
+        t.order = -1; t.correct = false; t.state = 'idle';
+        t.mat = ambientMat(t.i, t.j);
+        break;
+      }
+    }
+    return roadOk();
+  }
+
+  /** 길이 막혔으면 뚫는다 — 오답을 지우고, 그래도 안 되면 글자를 옮긴다 */
+  function openLetterPath() {
+    if (roadOk()) return true;
+    if (clearBlockingDecoys()) return true;
+    return moveLettersToRoad();
+  }
+
 
   /** 캐릭터가 서 있는 칸을 뺀 모든 칸을 섞어서 돌려준다 */
   function pickCells() {
@@ -881,6 +1053,8 @@ SK.Game = (function () {
       // 부서진 타일은 되살아나지 않는다. 글자는 성한 칸으로 옮겨 준다.
       // 이미 밟은 글자도 옮겨야 한다 — 틀리면 진행이 처음으로 돌아가 다시 밟아야 하므로.
       if (t.role === 'seq') relocateLabel(t);
+      // 부서진 자리가 길을 끊었을 수 있다 — 글자로 가는 길을 다시 뚫는다
+      openLetterPath();
       // 발밑이 무너졌으니 그대로 빠진다 — 구멍에 뛰어든 것과 같은 감점
       fallIntoHole(i, j);
     }
@@ -892,7 +1066,7 @@ SK.Game = (function () {
    * 그 보장을 무너뜨린다. 되살아나지도 않으므로, 끊길 자리는 아예 안 부서지게 한다.
    */
   function canBreak(t) {
-    return solidConnected(t) && solidCount() - 1 >= MIN_SOLID;
+    return solidConnected(t) && solidCount() - 1 >= MIN_SOLID && roadOkWithout(t);
   }
 
   function solidCount() {
@@ -947,6 +1121,8 @@ SK.Game = (function () {
 
     t.label = null; t.payload = null; t.role = 'plain'; t.order = -1; t.correct = false;
     t.state = 'idle';
+
+    openLetterPath();     // 옮긴 자리가 길을 막지 않는지 확인한다
 
     // 어디로 옮겨 갔는지 보이지 않으면 글자를 잃어버린 것처럼 느껴진다
     SK.Particles.stars(to.i, to.j, 12);
@@ -1314,6 +1490,9 @@ SK.Game = (function () {
         return { mat: t.mat, damage: t.damage, broken: t.broken, label: t.label, solid: SK.Tiles.isSolid(t) };
       },
       solidCount: solidCount,
+      /** 지금 판에서 정답을 순서대로 밟으러 갈 길이 있는가 */
+      pathOk: roadOk,
+      letterCount: function () { return quizTiles.length; },
       solidConnected: function () { return solidConnected(null); },
       setMat: function (i, j, mat) {
         var t = getTile(i, j);
