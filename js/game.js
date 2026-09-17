@@ -20,9 +20,10 @@ SK.Game = (function () {
 
   // 배경 바닥 재질 — 밟을 때마다 소리가 달라지도록 섞는다
   var AMBIENT_MATS = [
-    'wood', 'wood', 'keycap', 'cotton', 'leaf', 'bubble',
-    'sand', 'snow', 'glass', 'sponge', 'slime', 'orbeez',
-    'wood', 'sand', 'bubble', 'snow'
+    'wood', 'keycap', 'cotton', 'leaf', 'bubble', 'sand',
+    'snow', 'glass', 'sponge', 'slime', 'orbeez', 'water',
+    'gravel', 'moss', 'foam', 'paper', 'ice', 'wood',
+    'gravel', 'water', 'moss', 'ice', 'paper', 'foam'
   ];
 
   function ambientMat(i, j) {
@@ -134,14 +135,13 @@ SK.Game = (function () {
     renderHUD(true);
   }
 
-  /** 문제 타일을 바닥에 뿌린다 */
+  /** 문제 타일을 바닥에 뿌린다 — 밟힌 흔적과 균열은 그대로 둔다 */
   function layoutQuiz(q) {
     for (var k = 0; k < quizTiles.length; k++) {
       var old = quizTiles[k];
       old.label = null; old.role = 'plain'; old.payload = null;
       old.state = 'idle'; old.order = -1; old.correct = false;
       old.mat = ambientMat(old.i, old.j);
-      SK.Tiles.reset(old);
     }
     quizTiles = [];
 
@@ -159,7 +159,6 @@ SK.Game = (function () {
       t.correct = it.correct;
       t.state = 'idle';
       t.mat = q.material;
-      SK.Tiles.reset(t);
       quizTiles.push(t);
     }
   }
@@ -170,8 +169,7 @@ SK.Game = (function () {
     for (var i = 0; i < GRID; i++) {
       for (var j = 0; j < GRID; j++) {
         if (player && i === player.ci && j === player.cj) continue;
-        var t = getTile(i, j);
-        if (!t || t.gap) continue;
+        if (!SK.Tiles.isSolid(getTile(i, j))) continue;   // 빈칸·부서진 자리는 빼고
         cand.push({ i: i, j: j });
       }
     }
@@ -451,7 +449,7 @@ SK.Game = (function () {
       SK.Particles.trail(player.x, player.y, player.z * 0.9, player.power);
     }
 
-    for (var i = 0; i < tiles.length; i++) SK.Tiles.update(tiles[i], dt, now);
+    for (var i = 0; i < tiles.length; i++) SK.Tiles.update(tiles[i], dt);
     updateAim(dt);
 
     // 카메라 — 보드 중심에서 캐릭터 쪽으로 조금만 따라간다
@@ -492,7 +490,7 @@ SK.Game = (function () {
     var mat = t.mat;
     var pan = panOf(i, j), depth = depthOf(i, j);
 
-    var res = SK.Tiles.stomp(t, intensity, now, power);
+    var res = SK.Tiles.stomp(t, intensity, power);
 
     switch (res.sound) {
       case 'shatter':
@@ -521,6 +519,58 @@ SK.Game = (function () {
     }
 
     visit(t);
+
+    // 부서진 타일은 되살아나지 않는다. 아직 못 밟은 글자는 성한 칸으로 옮겨 준다
+    if (res.sound === 'shatter' && t.role === 'seq' && t.state !== 'done') relocateLabel(t);
+    renewBoardIfWorn();
+  }
+
+  /** 글자가 얹힌 타일이 부서졌을 때 — 타일을 되살리는 대신 글자만 이사시킨다 */
+  function relocateLabel(t) {
+    var cand = [];
+    for (var k = 0; k < tiles.length; k++) {
+      var o = tiles[k];
+      if (o === t || o.label || o.damage > 0 || !SK.Tiles.isSolid(o)) continue;
+      if (o.i === player.ci && o.j === player.cj) continue;
+      cand.push(o);
+    }
+    if (!cand.length) return;
+
+    var slot = quizTiles.indexOf(t);
+    if (slot < 0) return;
+
+    var to = SK.Quiz.shuffle(cand)[0];
+    to.label = t.label; to.payload = t.payload; to.mat = t.mat;
+    to.role = 'seq'; to.order = t.order; to.correct = t.correct; to.state = 'idle';
+    quizTiles[slot] = to;
+
+    t.label = null; t.payload = null; t.role = 'plain'; t.order = -1; t.correct = false;
+
+    // 어디로 옮겨 갔는지 보이지 않으면 글자를 잃어버린 것처럼 느껴진다
+    SK.Particles.stars(to.i, to.j, 12);
+    SK.Particles.ring(to.i, to.j, { size: 110, life: 0.5, width: 3, color: 'rgba(255,255,255,' });
+  }
+
+  /**
+   * 성한 발판이 너무 줄면 새 산책 구역으로 갈아 끼운다.
+   * 부서진 타일을 되살리는 것이 아니라, 판 전체를 새로 까는 것이다 —
+   * 그러지 않으면 딛고 설 곳이 없어 문제를 풀 수 없게 된다.
+   */
+  function renewBoardIfWorn() {
+    var solid = 0;
+    for (var k = 0; k < tiles.length; k++) if (SK.Tiles.isSolid(tiles[k])) solid++;
+
+    var reachable = false;
+    for (var d = 0; d < SK.Player.DIRS.length; d++) {
+      var dir = SK.Player.DIRS[d];
+      if (SK.Tiles.isSolid(getTile(player.ci + dir.di, player.cj + dir.dj))) { reachable = true; break; }
+    }
+    if (reachable && solid >= Math.max(8, Math.round(tiles.length * 0.45))) return;
+
+    quizTiles = [];
+    buildWorld();
+    if (fsm && fsm.quiz) layoutQuiz(fsm.quiz);
+    SK.Particles.text(player.x, player.y, '새 산책 구역!', { size: 26, color: '#8ef0c0', gz: 1.2, life: 1.2 });
   }
 
   /** 빈칸에 발을 디뎠다 — 아래로 떨어지고 점수를 잃는다 */
@@ -568,9 +618,6 @@ SK.Game = (function () {
     if (r.type === 'progress' || r.type === 'solved') {
       t.state = 'done';
       t.flash = 1;
-      // 정답 타일은 별빛과 함께 원래대로 복구된다 —
-      // 소모성 재질이라도 정답 진행이 막히는 일이 없도록.
-      SK.Tiles.reset(t);
       SK.Particles.solveMark(t.i, t.j);
       SK.Particles.stars(t.i, t.j, 26);
       SK.Particles.ring(t.i, t.j, { size: 105, life: 0.45, width: 4, color: 'rgba(142,240,192,' });

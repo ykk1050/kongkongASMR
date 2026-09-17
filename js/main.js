@@ -111,7 +111,7 @@
 
       var hits = document.createElement('span');
       hits.className = 'legend-hits';
-      hits.textContent = m.durability ? (m.durability + '번이면 부서짐') : '눌렸다 복원';
+      hits.textContent = m.durability ? (m.durability + '번째에 사라짐') : '눌렸다 복원';
 
       btn.appendChild(cv);
       btn.appendChild(name);

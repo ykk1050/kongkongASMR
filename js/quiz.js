@@ -44,7 +44,8 @@ SK.Quiz = (function () {
   var VALID_SUBJECTS = ['social', 'math'];
   var VALID_MATERIALS = [
     'keycap', 'cotton', 'jelly', 'leaf', 'bubble', 'wood',
-    'slime', 'orbeez', 'sand', 'glass', 'snow', 'sponge'
+    'slime', 'orbeez', 'sand', 'glass', 'snow', 'sponge',
+    'water', 'gravel', 'moss', 'foam', 'paper', 'ice'
   ];
 
   function normalizeAll(arr) {
