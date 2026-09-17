@@ -106,6 +106,13 @@
       ],
       "gain": 1.37
     },
+    "step_metal": {
+      "files": [
+        "metal_1.wav",
+        "metal_2.wav"
+      ],
+      "gain": 0.92
+    },
     "step_ice": {
       "files": [
         "ice_1.wav",

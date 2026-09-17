@@ -109,7 +109,7 @@ SK.Tiles = (function () {
       ink: '#3b2008', glow: '#ffd39a', thick: 0.72, squish: 0.3, art: 'cookie'
     },
     metal: {
-      label: '양철판', sound: '탱', klass: 'elastic', durability: 0, ring: 0.95,
+      label: '양철판', sound: '탱', klass: 'elastic', durability: 0, ring: 0.72,
       top: '#cfd8e0', topDark: '#94a3af', side: '#7c8b98', side2: '#5f6c78',
       ink: '#1d2830', glow: '#eaf4ff', thick: 0.62, squish: 0.12, art: 'metal'
     },

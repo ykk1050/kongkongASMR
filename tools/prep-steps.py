@@ -18,6 +18,7 @@
     python tools/prep-steps.py report
     python tools/prep-steps.py normalize [--target 0.10] [--ceiling 0.95] [--apply]
     python tools/prep-steps.py slice <원본.wav> <재질이름> <개수>
+    python tools/prep-steps.py slice <원본.wav> metal 1 --raw --tail 0.02   # 여운 보존
 
 `--apply` 없이 실행하면 아무것도 쓰지 않고 표만 보여 준다.
 mp3 원본은 먼저 모노 44.1kHz wav로 바꿔서 넣는다:
@@ -201,9 +202,12 @@ def _env(d, sr, hop_ms=5.0, win_ms=18.0):
 
 def slice_steps(src, stem, want, out_dir=AUDIO_DIR,
                 gap_ms=230, rel=0.15, pre_ms=20, min_ms=260, max_ms=580,
-                tail_rel=0.15, max_crest_db=24.0, head_rel=0.18):
+                tail_rel=0.15, max_crest_db=24.0, head_rel=0.18, denoise_on=True):
     d, sr = load(src)
-    dn = denoise(d, sr)
+    # 잡음 프로파일은 "가장 조용한 300ms"다. 원본이 한 방짜리 스튜디오 녹음이면
+    # 그 구간이 곧 **여운 자체**라서, 차감하면 울림이 통째로 깎여 나간다(양철·유리·
+    # 얼음처럼 ring 이 정체성인 재질에서 치명적). 그런 원본은 --raw 로 끈다.
+    dn = denoise(d, sr) if denoise_on else d.copy()
     e, hop = _env(dn, sr)
 
     df = np.maximum(0, np.diff(e, prepend=e[0]))
@@ -323,8 +327,9 @@ def cmd_normalize(a):
 
 def cmd_slice(a):
     out, n = slice_steps(a.source, a.stem, a.count, rel=a.rel, gap_ms=a.gap,
-                         min_ms=a.min_ms, max_ms=a.max_ms,
-                         max_crest_db=a.max_crest, head_rel=a.head)
+                         min_ms=a.min_ms, max_ms=a.max_ms, tail_rel=a.tail,
+                         max_crest_db=a.max_crest, head_rel=a.head,
+                         denoise_on=not a.raw)
     print('온셋 %d개 검출 → %d개 채택' % (n, len(out)))
     for name, dur, crest, at in out:
         print('  %-14s %5.3fs  crest %4.1fdB  (원본 %6.3fs 지점)' % (name, dur, crest, at))
@@ -350,6 +355,10 @@ if __name__ == '__main__':
     s.add_argument('--max', dest='max_ms', type=float, default=580, help='조각 최대 길이 ms')
     s.add_argument('--max-crest', type=float, default=24.0)
     s.add_argument('--head', type=float, default=0.18, help='앞머리 허용 잡음 비율')
+    s.add_argument('--tail', type=float, default=0.15,
+                   help='꼬리를 끊는 문턱(피크 대비). 여운을 살리려면 0.02까지 낮춘다')
+    s.add_argument('--raw', action='store_true',
+                   help='잡음 차감 끄기 — 여운이 긴 한 방짜리 깨끗한 원본에 쓴다')
     s.set_defaults(fn=cmd_slice)
     args = ap.parse_args()
     if not getattr(args, 'fn', None):
