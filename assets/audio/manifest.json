@@ -52,7 +52,7 @@
         "leaf_4.wav",
         "leaf_5.wav"
       ],
-      "gain": 1.8
+      "gain": 1.964
     },
     "step_sand": {
       "files": [
@@ -72,7 +72,7 @@
         "snow_4.wav",
         "snow_5.wav"
       ],
-      "gain": 0.497
+      "gain": 0.552
     }
   }
 }

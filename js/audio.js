@@ -50,7 +50,8 @@ SK.Audio = (function () {
 
     // 여러 소리가 겹쳐도 지저분해지지 않도록 부드럽게 눌러 준다
     limiter = ctx.createDynamicsCompressor();
-    limiter.threshold.value = -14;
+    // 임계값이 낮으면 작은 소리까지 눌려 전체가 먹먹해진다
+    limiter.threshold.value = -10;
     limiter.knee.value = 8;
     limiter.ratio.value = 6;
     limiter.attack.value = 0.003;
@@ -65,7 +66,7 @@ SK.Audio = (function () {
     warmth.connect(limiter);
 
     preMaster = ctx.createGain();
-    preMaster.gain.value = 1;
+    preMaster.gain.value = 1.45;   // 리미터로 들어가는 드라이브 — 전체 음량을 여기서 올린다
     preMaster.connect(warmth);
 
     dryBus = ctx.createGain(); dryBus.gain.value = 1.0; dryBus.connect(preMaster);

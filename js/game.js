@@ -14,6 +14,10 @@ SK.Game = (function () {
   var GRID = 5;
   var START = { i: 2, j: 2 };
 
+  /* 발판 없이 비워 두는 칸의 비율 · 빠졌을 때 잃는 점수 */
+  var GAP_RATIO = 0.1;
+  var FALL_PENALTY = 15;
+
   // 배경 바닥 재질 — 밟을 때마다 소리가 달라지도록 섞는다
   var AMBIENT_MATS = [
     'wood', 'wood', 'keycap', 'cotton', 'leaf', 'bubble',
@@ -88,6 +92,22 @@ SK.Game = (function () {
         tileAt[i + ',' + j] = t;
       }
     }
+    placeGaps();
+  }
+
+  /** 발판이 아예 없는 빈칸을 몇 개 뚫는다 — 디디면 떨어져 점수를 잃는다 */
+  function placeGaps() {
+    var cand = [];
+    for (var k = 0; k < tiles.length; k++) {
+      var t = tiles[k];
+      t.gap = false;
+      if (t.i === START.i && t.j === START.j) continue;
+      if (player && t.i === player.ci && t.j === player.cj) continue;
+      cand.push(t);
+    }
+    cand = SK.Quiz.shuffle(cand);
+    var n = Math.min(cand.length, Math.max(1, Math.round(tiles.length * GAP_RATIO)));
+    for (var g = 0; g < n; g++) cand[g].gap = true;
   }
 
   function getTile(i, j) { return tileAt[i + ',' + j] || null; }
@@ -119,7 +139,7 @@ SK.Game = (function () {
     for (var k = 0; k < quizTiles.length; k++) {
       var old = quizTiles[k];
       old.label = null; old.role = 'plain'; old.payload = null;
-      old.state = 'idle'; old.hi = 0; old.order = -1; old.correct = false;
+      old.state = 'idle'; old.order = -1; old.correct = false;
       old.mat = ambientMat(old.i, old.j);
       SK.Tiles.reset(old);
     }
@@ -138,7 +158,6 @@ SK.Game = (function () {
       t.order = it.order;
       t.correct = it.correct;
       t.state = 'idle';
-      t.hi = 0;
       t.mat = q.material;
       SK.Tiles.reset(t);
       quizTiles.push(t);
@@ -151,6 +170,8 @@ SK.Game = (function () {
     for (var i = 0; i < GRID; i++) {
       for (var j = 0; j < GRID; j++) {
         if (player && i === player.ci && j === player.cj) continue;
+        var t = getTile(i, j);
+        if (!t || t.gap) continue;
         cand.push({ i: i, j: j });
       }
     }
@@ -397,9 +418,11 @@ SK.Game = (function () {
   }
 
   var worldApi = {
+    // 빈칸도 뛰어들 수는 있다 — 대신 떨어져서 점수를 잃는다
     canEnter: function (i, j) {
       if (!inBounds(i, j)) return false;
-      return SK.Tiles.isSolid(getTile(i, j));
+      var t = getTile(i, j);
+      return !!t && (t.gap || SK.Tiles.isSolid(t));
     },
     surfaceOf: function (i, j) {
       return SK.Tiles.surfaceOffset(getTile(i, j));
@@ -430,7 +453,6 @@ SK.Game = (function () {
 
     for (var i = 0; i < tiles.length; i++) SK.Tiles.update(tiles[i], dt, now);
     updateAim(dt);
-    updateHints(dt);
 
     // 카메라 — 보드 중심에서 캐릭터 쪽으로 조금만 따라간다
     var bc = world((GRID - 1) / 2, (GRID - 1) / 2, 0);
@@ -447,7 +469,7 @@ SK.Game = (function () {
   /** 지금 점프하면 어디에 착지하는지 타일에 표시한다 */
   function updateAim(dt) {
     var target = null;
-    if (!player.hopping && player.stunTimer <= 0 && player.aimDir) {
+    if (!player.hopping && !player.falling && player.stunTimer <= 0 && player.aimDir) {
       var ni = player.ci + player.aimDir.di;
       var nj = player.cj + player.aimDir.dj;
       if (worldApi.canEnter(ni, nj)) target = getTile(ni, nj);
@@ -460,23 +482,13 @@ SK.Game = (function () {
     }
   }
 
-  function updateHints(dt) {
-    var show = fsm && fsm.quiz && fsm.mistakes >= 2 && phase === 'play';
-    var exp = show ? fsm.expected() : null;
-    for (var k = 0; k < quizTiles.length; k++) {
-      var t = quizTiles[k];
-      var want = (exp != null && t.payload === exp) ? 1 : 0;
-      t.hi += (want - t.hi) * Math.min(1, dt * 6);
-      if (t.hi < 0.01) t.hi = 0;
-    }
-  }
-
   /* =========================================================
    *  착지 — 소리와 시각 효과를 항상 함께 낸다
    * ======================================================= */
   function land(intensity, power, i, j) {
     var t = getTile(i, j);
     if (!t) return;
+    if (t.gap) { fallInto(t); return; }
     var mat = t.mat;
     var pan = panOf(i, j), depth = depthOf(i, j);
 
@@ -509,6 +521,34 @@ SK.Game = (function () {
     }
 
     visit(t);
+  }
+
+  /** 빈칸에 발을 디뎠다 — 아래로 떨어지고 점수를 잃는다 */
+  function fallInto(t) {
+    var back = recoverCell(player.fromI, player.fromJ);
+    SK.Player.fall(player, back.i, back.j);
+
+    streak = 0; combo = 0;
+    score = Math.max(0, score - FALL_PENALTY);
+
+    SK.Audio.hollow({ pan: panOf(t.i, t.j) });
+    SK.Particles.ring(t.i, t.j, { size: 96, life: 0.5, color: 'rgba(120,132,200,' });
+    SK.Particles.text(t.i, t.j, '앗, 빈칸!', { size: 24, color: '#ff9aa8', life: 0.9, vz: 0.01 });
+    cam.shake = Math.max(cam.shake, 0.7);
+    renderHUD();
+  }
+
+  /** 떨어진 뒤 돌아갈 칸 — 뛰어온 칸이 사라졌다면 가장 가까운 성한 타일로 */
+  function recoverCell(i, j) {
+    if (SK.Tiles.isSolid(getTile(i, j))) return { i: i, j: j };
+    var best = null, bestD = Infinity;
+    for (var k = 0; k < tiles.length; k++) {
+      var t = tiles[k];
+      if (!SK.Tiles.isSolid(t)) continue;
+      var d = Math.abs(t.i - i) + Math.abs(t.j - j);
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    return best ? { i: best.i, j: best.j } : { i: START.i, j: START.j };
   }
 
   /* =========================================================
@@ -758,7 +798,9 @@ SK.Game = (function () {
           expected: fsm && fsm.expected(),
           progress: fsm ? fsm.progress.slice() : [],
           grid: GRID, spacing: SPACING, scale: scale,
-          player: { ci: player.ci, cj: player.cj, z: player.z, surface: player.surface },
+          player: { ci: player.ci, cj: player.cj, z: player.z, surface: player.surface, falling: player.falling },
+          score: score,
+          gaps: tiles.filter(function (t) { return t.gap; }).map(function (t) { return { i: t.i, j: t.j }; }),
           tiles: quizTiles.map(function (t) {
             return {
               i: t.i, j: t.j, label: t.label, correct: t.correct, order: t.order,

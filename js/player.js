@@ -16,6 +16,7 @@ SK.Player = (function () {
   var HOP_H = 0.62;          // 보통 도약 높이(격자 z 단위)
   var HOP_POWER_H = 1.25;
   var COOLDOWN = 0.05;       // 착지 후 다음 도약까지
+  var FALL_DUR = 0.55;       // 빈칸으로 떨어졌다가 되돌아오기까지
 
   /** 화면 8방향 → 격자 이웃 오프셋 */
   var DIRS = [
@@ -44,6 +45,9 @@ SK.Player = (function () {
       fromI: ci, fromJ: cj,
       x: ci, y: cj, z: 0,      // 렌더용 연속 좌표
       hopping: false,
+      falling: false,          // 빈칸으로 추락 중
+      fallT: 0,
+      backI: ci, backJ: cj,    // 추락 뒤 돌아갈 칸
       hopT: 0, hopDur: HOP_DUR, hopH: HOP_H,
       power: 1,                // 1=보통, 2=강한 점프
       cooldown: 0,
@@ -70,6 +74,8 @@ SK.Player = (function () {
    */
   function update(p, input, dt, world, ev) {
     p.justLanded = false;
+
+    if (p.falling) { advanceFall(p, dt, world); return; }
 
     if (p.stunTimer > 0) {
       p.stunTimer -= dt;
@@ -163,6 +169,34 @@ SK.Player = (function () {
 
   function stun(p, sec) { p.stunTimer = sec; p.chain = 0; }
 
+  /** 빈칸을 디뎠다 — 아래로 떨어졌다가 (backI, backJ) 칸에서 다시 나타난다 */
+  function fall(p, backI, backJ) {
+    p.falling = true;
+    p.fallT = 0;
+    p.hopping = false;
+    p.backI = backI; p.backJ = backJ;
+    p.chain = 0; p.chainTimer = 0;
+    p.squash = -0.35;
+  }
+
+  function advanceFall(p, dt, world) {
+    p.fallT += dt / FALL_DUR;
+    if (p.fallT < 1) {
+      p.z = -p.fallT * p.fallT * 3.4;     // 가속하며 떨어진다
+      p.squash = -0.3;
+      return;
+    }
+    p.falling = false;
+    p.fallT = 0;
+    p.ci = p.backI; p.cj = p.backJ;
+    p.x = p.ci; p.y = p.cj; p.z = 0;
+    p.surface = world.surfaceOf(p.ci, p.cj);
+    p.surfaceTarget = p.surface;
+    p.squash = 0.4;
+    p.cooldown = 0.2;
+    p.stunTimer = 0.3;
+  }
+
   /* ---------- 렌더 ---------- */
 
   /**
@@ -172,16 +206,18 @@ SK.Player = (function () {
   function draw(ctx, p, now, sx, sy, zpx) {
     var Iso = SK.Iso;
 
-    // --- 그림자: 항상 발밑 타일 윗면에 붙는다 ---
+    // --- 그림자: 항상 발밑 타일 윗면에 붙는다 (빈칸으로 떨어질 때는 받칠 바닥이 없다) ---
     var shadowY = sy - p.surface;
     var shrink = 1 / (1 + (zpx / (Iso.TZ * 2)) * 0.9);
-    ctx.save();
-    ctx.globalAlpha = 0.34 * shrink;
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.ellipse(sx, shadowY, 26 * shrink, 13 * shrink, 0, 0, 6.2832);
-    ctx.fill();
-    ctx.restore();
+    if (!p.falling) {
+      ctx.save();
+      ctx.globalAlpha = 0.34 * shrink;
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.ellipse(sx, shadowY, 26 * shrink, 13 * shrink, 0, 0, 6.2832);
+      ctx.fill();
+      ctx.restore();
+    }
 
     var sq = p.squash;
     var w = 27 * (1 + sq * 0.5);
@@ -193,7 +229,7 @@ SK.Player = (function () {
 
     // --- 소리 오라: 출력 레벨에 맞춰 맥동하는 링 (소리 ↔ 시각 연결) ---
     var level = SK.Audio.getLevel ? SK.Audio.getLevel() : 0;
-    if (level > 0.02) {
+    if (level > 0.02 && !p.falling) {
       ctx.save();
       ctx.translate(sx, shadowY);
       ctx.scale(1, Iso.TH / Iso.TW);
@@ -258,7 +294,7 @@ SK.Player = (function () {
   }
 
   return {
-    create: create, update: update, draw: draw, stun: stun,
+    create: create, update: update, draw: draw, stun: stun, fall: fall,
     quantize: quantize, DIRS: DIRS
   };
 })();
