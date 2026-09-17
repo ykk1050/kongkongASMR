@@ -28,19 +28,19 @@ SK.Particles = (function () {
     jelly: { hue: 156, light: 76, ring: 'rgba(142,240,192,', word: '통', fx: 'jiggle' },
     leaf: { hue: 32, light: 66, ring: 'rgba(255,178,103,', word: '바스락', fx: 'leafFly' },
     bubble: { hue: 196, light: 82, ring: 'rgba(168,232,255,', word: '뽁', fx: 'pop' },
-    wood: { hue: 30, light: 76, ring: 'rgba(232,201,160,', word: '탁', fx: 'press' },
+    wood: { hue: 30, light: 76, ring: 'rgba(232,201,160,', word: '탁', fx: 'thud' },
     slime: { hue: 266, light: 80, ring: 'rgba(217,196,255,', word: '찌걱', fx: 'goo' },
     orbeez: { hue: 336, light: 82, ring: 'rgba(255,208,230,', word: '톡톡', fx: 'balls' },
     sand: { hue: 42, light: 78, ring: 'rgba(255,238,194,', word: '사각', fx: 'grain' },
     glass: { hue: 196, light: 88, ring: 'rgba(232,250,255,', word: '챠랑', fx: 'sparkleRing' },
     snow: { hue: 205, light: 96, ring: 'rgba(255,255,255,', word: '뽀득', fx: 'flake' },
-    sponge: { hue: 44, light: 78, ring: 'rgba(255,240,189,', word: '뽀드득', fx: 'puff' },
+    sponge: { hue: 44, light: 78, ring: 'rgba(255,240,189,', word: '뽀드득', fx: 'squeeze' },
     water: { hue: 196, light: 84, ring: 'rgba(191,239,255,', word: '찰방', fx: 'splash' },
-    gravel: { hue: 220, light: 74, ring: 'rgba(216,220,228,', word: '자그락', fx: 'chunk' },
-    moss: { hue: 92, light: 68, ring: 'rgba(196,238,132,', word: '폭신', fx: 'puff' },
-    foam: { hue: 60, light: 94, ring: 'rgba(255,255,244,', word: '끼익', fx: 'grain' },
-    paper: { hue: 44, light: 88, ring: 'rgba(255,244,210,', word: '구깃', fx: 'chunk' },
-    ice: { hue: 194, light: 90, ring: 'rgba(234,252,255,', word: '쩌억', fx: 'sparkleRing' }
+    gravel: { hue: 220, light: 74, ring: 'rgba(216,220,228,', word: '자그락', fx: 'pebbles' },
+    cookie: { hue: 30, light: 70, ring: 'rgba(255,211,154,', word: '바삭', fx: 'crumbs' },
+    foam: { hue: 60, light: 94, ring: 'rgba(255,255,244,', word: '끼익', fx: 'creak' },
+    paper: { hue: 44, light: 88, ring: 'rgba(255,244,210,', word: '구깃', fx: 'crinkle' },
+    ice: { hue: 194, light: 90, ring: 'rgba(234,252,255,', word: '쩌억', fx: 'fracture' }
   };
   function pal(mat) { return PALETTE[mat] || PALETTE.wood; }
 
@@ -275,6 +275,174 @@ SK.Particles = (function () {
       for (var c = 0; c < 2; c++) {
         ring(gx, gy, { size: 54 + c * 46, life: 0.34 + c * 0.16, width: 2.4 - c * 0.8, gz: 0.01, color: P.ring });
       }
+    },
+
+    /* 나무 '탁' — 속이 빈 판을 친 소리. 먼지가 **바닥을 따라 낮게** 밀려 나가고
+       판이 함께 울린 흔적으로 낮은 링이 한 번 크게 퍼진다. 위로 튀면 흙이 된다 */
+    thud: function (gx, gy, P, i, power, s) {
+      var n = 7 + Math.round(i * 7);
+      for (var k = 0; k < n; k++) {
+        var a = Math.random() * 6.2832, sp = rnd(0.02, 0.05) * s;
+        push({
+          type: 'dot', gx: gx, gy: gy, gz: 0.012,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(0.002, 0.012),
+          gravity: -0.03, life: rnd(0.3, 0.55), size: rnd(1.6, 3.4),
+          color: 'hsla(' + P.hue + ',55%,' + (P.light - 6) + '%,', alpha: 0.42
+        });
+      }
+      // 판이 울린 자국 — 낮고 넓게 한 번
+      ring(gx, gy, { size: 120 + i * 60, life: 0.26, width: 5, gz: 0.005, color: P.ring });
+      // 이음새에서 튄 나뭇결 부스러기 두어 개
+      for (var c = 0; c < 2; c++) {
+        var ca = Math.random() * 6.2832;
+        push({
+          type: 'shard', gx: gx, gy: gy, gz: 0.04,
+          vx: Math.cos(ca) * 0.02, vy: Math.sin(ca) * 0.012, vz: rnd(0.02, 0.04),
+          gravity: -0.14, life: rnd(0.4, 0.7), size: rnd(2.5, 4.5),
+          rot: ca, color: 'hsla(28,60%,58%,'
+        });
+      }
+    },
+
+    /* 스펀지 '뽀드득' — 구멍에서 공기가 밀려 나온다.
+       구름(puff)만 쓰면 솜과 구분이 안 되므로, 구멍에서 뿜어 나오는 **가는 공기 줄기**를 얹는다 */
+    squeeze: function (gx, gy, P, i, power, s) {
+      for (var k = 0; k < 6; k++) {
+        var a = (k / 6) * 6.2832 + rnd(-0.3, 0.3);
+        push({
+          type: 'streak', gx: gx, gy: gy, gz: 0.03,
+          vx: Math.cos(a) * 0.022 * s, vy: Math.sin(a) * 0.013 * s, vz: rnd(0.004, 0.016),
+          gravity: -0.02, life: rnd(0.24, 0.42), size: rnd(7, 13), rot: a,
+          color: 'hsla(' + P.hue + ',60%,96%,'
+        });
+      }
+      IMPACT.puff(gx, gy, P, i * 0.7, power, s);
+    },
+
+    /* 스티로폼 '끼익' — 마른 마찰. 흰 알갱이가 부스러지고,
+       삐걱대는 소리를 지그재그 선 두 줄로 보여 준다 */
+    creak: function (gx, gy, P, i, power, s) {
+      var n = 12 + Math.round(i * 12);
+      for (var k = 0; k < n; k++) {
+        var a = Math.random() * 6.2832, sp = rnd(0.006, 0.026) * s;
+        push({
+          type: 'dot', gx: gx, gy: gy, gz: 0.03,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(0.01, 0.04),
+          gravity: -0.16, life: rnd(0.3, 0.6), size: rnd(1.6, 3.4),
+          color: 'hsla(56,35%,99%,', alpha: 0.95
+        });
+      }
+      for (var z = 0; z < 2; z++) {
+        var za = rnd(0, 6.2832);
+        push({
+          type: 'streak', gx: gx, gy: gy, gz: 0.1 + z * 0.06,
+          vx: Math.cos(za) * 0.004, vy: Math.sin(za) * 0.004, vz: 0.03,
+          gravity: -0.02, life: 0.3, size: 14, rot: za, spin: 26,
+          color: 'hsla(50,30%,100%,'
+        });
+      }
+    },
+
+    /* 얼음 '쩌억' — 쩍 갈라진다. 균열선이 **중심에서 곧게 뻗고**,
+       뒤이어 냉기가 퍼지며 잔 조각이 반짝인다 */
+    fracture: function (gx, gy, P, i, power, s) {
+      var arms = 4 + Math.round(i * 3);
+      for (var k = 0; k < arms; k++) {
+        var a = (k / arms) * 6.2832 + rnd(-0.25, 0.25);
+        push({
+          type: 'streak', gx: gx, gy: gy, gz: 0.015,
+          vx: Math.cos(a) * 0.01, vy: Math.sin(a) * 0.006, vz: 0,
+          gravity: 0, life: rnd(0.3, 0.5), size: rnd(16, 30), rot: a,
+          color: 'hsla(195,90%,98%,'
+        });
+      }
+      // 튀어 오르는 얼음 조각
+      for (var c = 0; c < 6; c++) {
+        var ca = Math.random() * 6.2832, sp = rnd(0.014, 0.04) * s;
+        push({
+          type: 'shard', gx: gx, gy: gy, gz: 0.07,
+          vx: Math.cos(ca) * sp, vy: Math.sin(ca) * sp * 0.6, vz: rnd(0.03, 0.075),
+          gravity: -0.2, life: rnd(0.4, 0.8), size: rnd(3, 6.5),
+          rot: ca, spin: rnd(-9, 9),
+          color: 'hsla(195,70%,92%,'
+        });
+      }
+      // 갈라진 자리에서 번지는 냉기
+      push({
+        type: 'puff', gx: gx, gy: gy, gz: 0.02,
+        vx: 0, vy: 0, vz: 0.004, gravity: -0.01,
+        life: 0.6, size: 18, color: 'hsla(198,80%,96%,', alpha: 0.4
+      });
+      stars(gx, gy, 4 + Math.round(i * 4), 195);
+    },
+
+    /* 자갈 '자그락' — 돌이 서로 부딪혀 **튀고 굴러간다**.
+       구슬(balls)보다 무겁고 낮게, 회색 세 톤으로 */
+    pebbles: function (gx, gy, P, i, power, s) {
+      var tones = [86, 70, 58, 92];
+      var n = 6 + Math.round(i * 6);
+      for (var k = 0; k < n; k++) {
+        var a = Math.random() * 6.2832, sp = rnd(0.016, 0.045) * s;
+        push({
+          type: 'chunk', gx: gx, gy: gy, gz: 0.04,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(0.02, 0.055),
+          gravity: -0.26, life: rnd(0.45, 0.85), size: rnd(2.6, 5.2),
+          rot: Math.random() * 6.28, spin: rnd(-16, 16),
+          sides: 4 + (k % 2),
+          color: 'hsla(220,8%,' + tones[k % tones.length] + '%,'
+        });
+      }
+      // 돌 밑에서 일어나는 마른 먼지
+      IMPACT.press(gx, gy, P, i * 0.5, power, s);
+    },
+
+    /* 종이 '구깃' — 얇은 조각이 **팔랑이며** 떠다닌다. 무겁게 떨어지면 판지가 된다 */
+    crinkle: function (gx, gy, P, i, power, s) {
+      var n = 5 + Math.round(i * 5);
+      for (var k = 0; k < n; k++) {
+        var a = Math.random() * 6.2832, sp = rnd(0.008, 0.026) * s;
+        push({
+          type: 'scrap', gx: gx, gy: gy, gz: 0.08,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(0.02, 0.05),
+          gravity: -0.05, life: rnd(0.7, 1.2), size: rnd(4, 8),
+          rot: Math.random() * 6.28, spin: rnd(-5, 5),
+          sway: rnd(4, 9), swayPhase: Math.random() * 6.28,
+          color: 'hsla(44,60%,' + rnd(92, 99) + '%,'
+        });
+      }
+      IMPACT.press(gx, gy, P, i * 0.4, power, s);
+    },
+
+    /* 쿠키 '바삭' — 부스러기가 사방으로 튀고 초코칩 몇 알이 굴러 나간다 */
+    crumbs: function (gx, gy, P, i, power, s) {
+      var n = 12 + Math.round(i * 14);
+      for (var k = 0; k < n; k++) {
+        var a = Math.random() * 6.2832, sp = rnd(0.012, 0.042) * s;
+        push({
+          type: 'chunk', gx: gx, gy: gy, gz: 0.05,
+          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(0.025, 0.07),
+          gravity: -0.22, life: rnd(0.4, 0.8), size: rnd(1.8, 4.2),
+          rot: Math.random() * 6.28, spin: rnd(-14, 14),
+          sides: 3 + (k % 3),
+          color: 'hsla(' + rnd(26, 36) + ',' + rnd(55, 75) + '%,' + rnd(58, 78) + '%,'
+        });
+      }
+      // 초코칩 — 굵고 어둡게, 느리게 굴러간다
+      for (var c = 0; c < 2 + Math.round(i * 2); c++) {
+        var ca = Math.random() * 6.2832;
+        push({
+          type: 'bubble', gx: gx, gy: gy, gz: 0.06,
+          vx: Math.cos(ca) * rnd(0.014, 0.03), vy: Math.sin(ca) * rnd(0.008, 0.018), vz: rnd(0.02, 0.045),
+          gravity: -0.24, life: rnd(0.5, 0.9), size: rnd(2.6, 4.4),
+          color: 'hsla(24,55%,26%,'
+        });
+      }
+      // 마른 가루가 낮게 피어오른다
+      push({
+        type: 'puff', gx: gx, gy: gy, gz: 0.03,
+        vx: 0, vy: 0, vz: 0.006, gravity: -0.02,
+        life: 0.5, size: 13, color: 'hsla(32,60%,80%,', alpha: 0.35
+      });
     }
   };
 
@@ -358,7 +526,7 @@ SK.Particles = (function () {
   /* 마른 재질은 각진 파편으로, 말랑한 재질은 둥근 알갱이로 부서진다 */
   var SHARDY = { leaf: 1, paper: 1, ice: 1, gravel: 1, glass: 1 };
   var BREAK_WORD = {
-    leaf: 'CRUNCH!', paper: '구깃-!', ice: '쩌저적!',
+    leaf: 'CRUNCH!', paper: '구깃-!', ice: '쩌저적!', cookie: '바사삭!',
     sand: '스르륵!', snow: '푹-!', orbeez: '톡톡톡!'
   };
 
@@ -417,10 +585,97 @@ SK.Particles = (function () {
         color: 'hsla(' + P.hue + ',78%,' + P.light + '%,'
       });
     }
+
+    // 재질마다 마지막 순간이 다르다 — 파괴음의 꼬리와 짝이 되는 연출
+    if (SHATTER_FX[mat]) SHATTER_FX[mat](gx, gy, P);
+
     text(gx, gy, BREAK_WORD[mat] || 'CRUNCH!', {
       size: 22, color: 'hsl(' + P.hue + ',85%,' + P.light + '%)', life: 0.85, gz: 0.45
     });
   }
+
+  /* 완전히 부서지는 마지막 순간의 재질별 꼬리.
+     공통 파편 위에 얹는 것이라, 여기서는 그 재질에서만 나는 것만 그린다. */
+  var SHATTER_FX = {
+    /* 눈 — 다져진 덩어리가 무너지며 가루가 피어오른다 */
+    snow: function (gx, gy, P) {
+      for (var k = 0; k < 4; k++) {
+        var a = Math.random() * 6.2832;
+        push({
+          type: 'puff', gx: gx, gy: gy, gz: 0.04,
+          vx: Math.cos(a) * 0.008, vy: Math.sin(a) * 0.005, vz: rnd(0.004, 0.014),
+          gravity: -0.01, life: rnd(0.7, 1.1), size: rnd(14, 24),
+          color: 'hsla(205,60%,99%,', alpha: 0.5
+        });
+      }
+      IMPACT.flake(gx, gy, P, 1, 1, 1.2);
+    },
+
+    /* 모래 — 무너진 자리에서 가루가 아래로 주르륵 쏟아진다 */
+    sand: function (gx, gy, P) {
+      for (var k = 0; k < 26; k++) {
+        var a = Math.random() * 6.2832;
+        push({
+          type: 'dot', gx: gx, gy: gy, gz: rnd(0.02, 0.12),
+          vx: Math.cos(a) * rnd(0.002, 0.012), vy: Math.sin(a) * rnd(0.002, 0.008),
+          vz: rnd(-0.02, -0.005),                       // 아래로 쏟아진다
+          gravity: -0.05, life: rnd(0.5, 0.9), size: rnd(1, 2.4),
+          color: 'hsla(' + rnd(38, 46) + ',62%,' + rnd(72, 86) + '%,', alpha: 0.9
+        });
+      }
+    },
+
+    /* 종이 — 찢긴 조각이 한참 팔랑이다 가라앉는다 */
+    paper: function (gx, gy, P) {
+      for (var k = 0; k < 9; k++) {
+        var a = Math.random() * 6.2832;
+        push({
+          type: 'scrap', gx: gx, gy: gy, gz: rnd(0.08, 0.2),
+          vx: Math.cos(a) * rnd(0.006, 0.022), vy: Math.sin(a) * rnd(0.004, 0.014),
+          vz: rnd(0.01, 0.045),
+          gravity: -0.035, life: rnd(1.1, 1.8), size: rnd(5, 10),
+          rot: Math.random() * 6.28, spin: rnd(-4, 4),
+          sway: rnd(6, 12), swayPhase: Math.random() * 6.28,
+          color: 'hsla(44,55%,' + rnd(92, 99) + '%,'
+        });
+      }
+    },
+
+    /* 얼음 — 갈라지는 섬광 + 냉기, 그리고 반짝이는 조각 */
+    ice: function (gx, gy, P) {
+      push({
+        type: 'gleam', gx: gx, gy: gy, gz: 0.25,
+        life: 0.42, size: 46, rot: 0.5, color: 'rgba(255,255,255,'
+      });
+      IMPACT.fracture(gx, gy, P, 1, 1, 1.3);
+      stars(gx, gy, 10, 195);
+    },
+
+    /* 쿠키 — 크게 두 조각으로 갈라지고 부스러기가 쏟아진다 */
+    cookie: function (gx, gy, P) {
+      IMPACT.crumbs(gx, gy, P, 1, 1, 1.4);
+      for (var k = 0; k < 2; k++) {
+        var a = k ? 0.6 : 3.7;
+        push({
+          type: 'chunk', gx: gx, gy: gy, gz: 0.08,
+          vx: Math.cos(a) * 0.03, vy: Math.sin(a) * 0.018, vz: rnd(0.04, 0.07),
+          gravity: -0.2, life: rnd(0.8, 1.2), size: rnd(9, 13),
+          rot: a, spin: rnd(-6, 6), sides: 5,
+          color: 'hsla(30,62%,64%,'
+        });
+      }
+    },
+
+    /* 구슬볼 — 남은 구슬이 사방으로 튀어 굴러간다 */
+    orbeez: function (gx, gy, P) {
+      IMPACT.balls(gx, gy, P, 1, 1, 1.5);
+    },
+
+    /* 낙엽 — 마지막 잎들이 높이 떠올랐다 내려앉는다 */
+    leaf: function (gx, gy, P) {
+      IMPACT.leafFly(gx, gy, P, 1, 1, 1.4);
+    }
+  };
 
   /** 점프 중 공기를 가르는 궤적 */
   function trail(gx, gy, gz, power) {
@@ -576,6 +831,19 @@ SK.Particles = (function () {
           ctx.beginPath();
           ctx.moveTo(-p.size * 0.9, 0); ctx.lineTo(p.size * 0.9, 0);
           ctx.stroke();
+          break;
+
+        /* 종이 조각 — 낙엽과 달리 각진 판이고, 뒤집힐 때 거의 선이 된다 */
+        case 'scrap':
+          var sflip = Math.cos(p.age * 8 + (p.swayPhase || 0));
+          ctx.translate(s.x + Math.sin(p.age * 5.5 + (p.swayPhase || 0)) * (p.sway || 0), s.y);
+          ctx.rotate(p.rot + (p.spin || 0) * p.age * 0.1);
+          ctx.scale(1, 0.12 + Math.abs(sflip) * 0.88);
+          ctx.fillStyle = p.color + a + ')';
+          ctx.fillRect(-p.size, -p.size * 0.7, p.size * 2, p.size * 1.4);
+          ctx.strokeStyle = 'rgba(150,132,90,' + (a * 0.6) + ')';
+          ctx.lineWidth = 0.8;
+          ctx.strokeRect(-p.size, -p.size * 0.7, p.size * 2, p.size * 1.4);
           break;
 
         case 'bubble':

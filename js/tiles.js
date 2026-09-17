@@ -103,10 +103,10 @@ SK.Tiles = (function () {
       top: '#ccd0d8', topDark: '#9ba1ad', side: '#848a97', side2: '#686e7a',
       ink: '#23262e', glow: '#e4e7ee', thick: 0.8, squish: 0.28, art: 'gravel'
     },
-    moss: {
-      label: '이끼', sound: '폭신', klass: 'elastic', durability: 0,
-      top: '#a8d96a', topDark: '#6da53c', side: '#59882f', side2: '#456b23',
-      ink: '#1d3208', glow: '#d2f59a', thick: 0.85, squish: 1.0, art: 'moss'
+    cookie: {
+      label: '쿠키', sound: '바삭', klass: 'consumable', durability: 4,
+      top: '#e0a76a', topDark: '#b87940', side: '#9a6231', side2: '#7c4e26',
+      ink: '#3b2008', glow: '#ffd39a', thick: 0.72, squish: 0.3, art: 'cookie'
     },
     foam: {
       label: '스티로폼', sound: '끼익', klass: 'elastic', durability: 0,
@@ -489,11 +489,23 @@ SK.Tiles = (function () {
 
     /* 젤리: 반투명 + 큰 하이라이트 + 안쪽 기포 */
     jelly: function (ctx, t, m, cx, cy, hw, hh, now) {
-      // 안쪽이 비쳐 보이는 코어
+      // 안쪽이 비쳐 보이는 코어 — 가장자리로 갈수록 짙어져야 '덩어리'가 된다
       ctx.save();
-      ctx.globalAlpha = 0.45;
-      ctx.fillStyle = '#1f7f5a';
-      diamond(ctx, cx, cy + hh * 0.12, 0.62, 0.62); ctx.fill();
+      var core = ctx.createRadialGradient(cx - hw * 0.18, cy - hh * 0.2, 2, cx, cy + hh * 0.1, hw * 0.8);
+      core.addColorStop(0, 'rgba(210,255,236,.75)');
+      core.addColorStop(0.55, 'rgba(66,196,146,.45)');
+      core.addColorStop(1, 'rgba(18,116,84,.6)');
+      ctx.fillStyle = core;
+      diamond(ctx, cx, cy + hh * 0.04, 0.84, 0.84); ctx.fill();
+      ctx.restore();
+
+      // 표면이 부풀어 흔들린다 — 젤리는 평평하지 않다
+      ctx.save();
+      var wob = Math.sin(now * 2.2 + t.seed) * 0.02;
+      ctx.fillStyle = 'rgba(255,255,255,.18)';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - hh * 0.08, hw * (0.54 + wob), hh * (0.5 + wob), 0, 0, 6.2832);
+      ctx.fill();
       ctx.restore();
       // 큼직한 광택
       ctx.save();
@@ -973,150 +985,348 @@ SK.Tiles = (function () {
       ctx.restore();
     },
 
-    /* 물웅덩이: 고인 물 + 끊임없이 번지는 잔물결 */
+    /* 물웅덩이: 고인 물 + 번지는 잔물결 + 수면에 비친 빛.
+       물은 '파란 면'이 아니라 **바닥이 비쳐 보이는 얕은 층**이다.
+       가장자리에 젖은 테두리를 두르지 않으면 파란 종이로 보인다. */
     water: function (ctx, t, m, cx, cy, hw, hh, now) {
       ctx.save();
-      // 가운데가 깊다 — 가장자리로 갈수록 얕고 밝아진다
-      var g = ctx.createRadialGradient(cx, cy, 2, cx, cy, hw * 0.9);
-      g.addColorStop(0, 'rgba(22,94,132,.55)');
-      g.addColorStop(1, 'rgba(158,228,250,.25)');
+
+      // 젖은 가장자리 — 물이 고인 자리는 테두리가 진하다
+      ctx.fillStyle = 'rgba(52,132,170,.5)';
+      diamond(ctx, cx, cy, 0.99, 0.99); ctx.fill();
+
+      // 고인 물 — 가운데가 깊고, 바닥 그림자가 비친다
+      var g = ctx.createRadialGradient(cx - hw * 0.15, cy - hh * 0.2, 2, cx, cy, hw * 0.95);
+      g.addColorStop(0, 'rgba(126,214,244,.5)');
+      g.addColorStop(0.55, 'rgba(38,124,166,.62)');
+      g.addColorStop(1, 'rgba(16,78,112,.72)');
       ctx.fillStyle = g;
       diamond(ctx, cx, cy, 0.9, 0.9); ctx.fill();
 
-      // 가만히 있어도 물결이 번진다 — 정지 화면에서도 '물'로 읽히는 단서
+      // 바닥에 비친 하늘 — 위쪽 절반만 밝다
+      ctx.fillStyle = 'rgba(200,244,255,.22)';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - hh * 0.86);
+      ctx.lineTo(cx + hw * 0.86, cy);
+      ctx.lineTo(cx, cy - hh * 0.1);
+      ctx.closePath(); ctx.fill();
+
+      // 끊임없이 번지는 잔물결 — 정지 화면에서도 '물'로 읽히는 단서.
+      // 마름모로 그리면 물이 아니라 도형이 된다. 물결은 원이고, 아이소에서 원은 타원이다
       for (var k = 0; k < 3; k++) {
         var ph = ((now * 0.32 + t.seed * 0.15 + k * 0.34) % 1);
-        ctx.strokeStyle = 'rgba(255,255,255,' + (0.45 * (1 - ph)).toFixed(3) + ')';
-        ctx.lineWidth = 1.6;
-        diamond(ctx, cx, cy, 0.22 + ph * 0.64, 0.22 + ph * 0.64); ctx.stroke();
+        var rr = 0.14 + ph * 0.72;
+        ctx.strokeStyle = 'rgba(232,252,255,' + (0.55 * (1 - ph) * (1 - ph)).toFixed(3) + ')';
+        ctx.lineWidth = 1.9 * (1 - ph * 0.5);
+        ctx.beginPath();
+        ctx.ellipse(cx, cy - hh * 0.04, hw * rr, hh * rr, 0, 0, 6.2832);
+        ctx.stroke();
+        // 물결의 그늘 — 밝은 선 바로 아래 어두운 선이 붙어야 융기로 읽힌다
+        ctx.strokeStyle = 'rgba(10,60,92,' + (0.3 * (1 - ph)).toFixed(3) + ')';
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy - hh * 0.04 + 1.6, hw * rr, hh * rr, 0, 0, 6.2832);
+        ctx.stroke();
       }
 
-      // 수면에 비친 빛
-      ctx.fillStyle = 'rgba(255,255,255,.62)';
-      ctx.beginPath();
-      ctx.ellipse(cx - hw * 0.28, cy - hh * 0.26, hw * 0.2, hh * 0.09, -0.35, 0, 6.2832);
-      ctx.fill();
+      // 수면 반사 — 흔들리는 두 줄
+      ctx.strokeStyle = 'rgba(255,255,255,.72)'; ctx.lineCap = 'round';
+      for (var s = 0; s < 2; s++) {
+        var sy = cy - hh * (0.3 - s * 0.26);
+        var wob = Math.sin(now * 1.6 + t.seed + s) * 3;
+        ctx.lineWidth = 2.2 - s * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(cx - hw * (0.34 - s * 0.1) + wob, sy);
+        ctx.quadraticCurveTo(cx + wob * 0.5, sy - 2.5, cx + hw * (0.26 - s * 0.08) + wob, sy + 1);
+        ctx.stroke();
+      }
       ctx.restore();
     },
 
-    /* 자갈: 모서리가 살아 있는 돌 — 둥글면 구슬이 된다 */
+    /* 자갈: 모서리가 살아 있는 돌. 셋 이상의 톤을 섞어야 '돌무더기'가 된다 */
     gravel: function (ctx, t, m, cx, cy, hw, hh) {
       ctx.save();
-      var tone = ['#eceef3', '#c2c7d0', '#9aa0ac', '#d6dae1'];
+
+      // 돌 사이로 보이는 마른 흙
+      ctx.fillStyle = 'rgba(88,84,78,.55)';
+      diamond(ctx, cx, cy, 0.95, 0.95); ctx.fill();
+      for (var d = 0; d < 20; d++) {
+        var da = t.seed * 3.1 + d * 2.399, dr = Math.sqrt((d % 9) / 9) * 0.82;
+        ctx.fillStyle = 'rgba(150,148,142,.5)';
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(da) * hw * dr, cy + Math.sin(da) * hh * dr, 1.1, 0, 6.2832);
+        ctx.fill();
+      }
+
+      var tone = [
+        ['#f2f4f8', '#b9bec8'],   // 밝은 돌
+        ['#cfd4dc', '#9399a4'],
+        ['#a7adb8', '#6f757f'],   // 어두운 돌
+        ['#e2e6ec', '#a8aeb8']
+      ];
       for (var k = 0; k < 15; k++) {
         var a = t.seed * 1.3 + k * 2.399;
-        var rad = Math.sqrt((k % 11) / 11) * 0.76;
+        var rad = Math.sqrt((k % 11) / 11) * 0.74;
         var px = cx + Math.cos(a) * hw * rad, py = cy + Math.sin(a) * hh * rad;
-        var r = 3.6 + (k % 4) * 1.5;
+        var r = 3.8 + (k % 4) * 1.5;
+        var pair = tone[k % tone.length];
 
-        ctx.fillStyle = 'rgba(38,42,52,.35)';
-        ctx.beginPath(); ctx.ellipse(px + 1.4, py + r * 0.42, r, r * 0.46, 0, 0, 6.2832); ctx.fill();
+        // 돌 밑 그림자 — 있어야 표면 '위에' 놓인 것으로 읽힌다
+        ctx.fillStyle = 'rgba(32,34,40,.42)';
+        ctx.beginPath(); ctx.ellipse(px + 1.6, py + r * 0.44, r * 1.02, r * 0.44, 0, 0, 6.2832); ctx.fill();
 
-        ctx.fillStyle = tone[k % tone.length];
-        ctx.beginPath();
+        // 각진 몸통 — 빛 받는 면과 그늘진 면을 나눠 칠한다
+        var verts = [];
         for (var v = 0; v < 5; v++) {
-          var va = a + v * 1.2566, vr = r * (0.72 + ((k + v) % 3) * 0.17);
-          var vx = px + Math.cos(va) * vr, vy = py + Math.sin(va) * vr * 0.62;
-          if (v === 0) ctx.moveTo(vx, vy); else ctx.lineTo(vx, vy);
+          var va = a + v * 1.2566, vr = r * (0.74 + ((k + v) % 3) * 0.16);
+          verts.push([px + Math.cos(va) * vr, py + Math.sin(va) * vr * 0.62]);
+        }
+        var lg = ctx.createLinearGradient(px - r, py - r * 0.6, px + r, py + r * 0.6);
+        lg.addColorStop(0, pair[0]); lg.addColorStop(1, pair[1]);
+        ctx.fillStyle = lg;
+        ctx.beginPath();
+        for (var n = 0; n < verts.length; n++) {
+          if (n === 0) ctx.moveTo(verts[n][0], verts[n][1]); else ctx.lineTo(verts[n][0], verts[n][1]);
         }
         ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = 'rgba(58,64,76,.45)'; ctx.lineWidth = 0.9; ctx.stroke();
-      }
-      ctx.restore();
-    },
 
-    /* 이끼: 도톰한 덩어리 + 곤두선 잔털 */
-    moss: function (ctx, t, m, cx, cy, hw, hh) {
-      ctx.save();
-      for (var p = 0; p < 4; p++) {
-        var a = t.seed + p * 1.57;
-        var mx = cx + Math.cos(a) * hw * 0.3, my = cy + Math.sin(a) * hh * 0.3;
-        ctx.fillStyle = (p % 2) ? 'rgba(98,162,50,.9)' : 'rgba(126,190,68,.9)';
-        ctx.beginPath(); ctx.ellipse(mx, my, hw * 0.36, hh * 0.36, 0, 0, 6.2832); ctx.fill();
-      }
-      ctx.strokeStyle = 'rgba(196,238,132,.85)'; ctx.lineWidth = 1.2; ctx.lineCap = 'round';
-      for (var k = 0; k < 26; k++) {
-        var aa = t.seed * 2.1 + k * 2.399;
-        var rr = Math.sqrt((k % 9) / 9) * 0.74;
-        var gx = cx + Math.cos(aa) * hw * rr, gy = cy + Math.sin(aa) * hh * rr;
+        // 모서리에 걸리는 빛 한 줄 — 각이 살아난다
+        ctx.strokeStyle = 'rgba(255,255,255,.65)'; ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(gx, gy);
-        ctx.lineTo(gx + Math.cos(aa * 3) * 2, gy - 4 - (k % 3));
+        ctx.moveTo(verts[0][0], verts[0][1]); ctx.lineTo(verts[1][0], verts[1][1]);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(46,50,58,.5)'; ctx.lineWidth = 0.9;
+        ctx.beginPath();
+        ctx.moveTo(verts[2][0], verts[2][1]); ctx.lineTo(verts[3][0], verts[3][1]);
         ctx.stroke();
       }
-      // 이끼는 늘 젖어 있다 — 물방울 두 알
-      ctx.fillStyle = 'rgba(235,255,210,.75)';
-      ctx.beginPath(); ctx.ellipse(cx - hw * 0.2, cy + hh * 0.18, 2.6, 1.8, 0, 0, 6.2832); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(cx + hw * 0.26, cy - hh * 0.1, 2, 1.4, 0, 0, 6.2832); ctx.fill();
       ctx.restore();
     },
 
-    /* 스티로폼: 눌러 붙은 하얀 알갱이 */
+    /* 쿠키: 도톰하게 구운 반죽 + 박힌 초코칩.
+       밟을수록 가장자리가 부서져 나가고 칩이 줄어든다 — '바삭'이 눈에 보이게 */
+    cookie: function (ctx, t, m, cx, cy, hw, hh) {
+      ctx.save();
+      var wear = m.durability ? t.damage / m.durability : 0;
+
+      // 구운 반죽 — 가장자리가 울퉁불퉁해야 '틀에 찍은 것'이 아니라 '구운 것'이 된다
+      ctx.beginPath();
+      for (var k = 0; k <= 26; k++) {
+        var a = (k / 26) * 6.2832;
+        var rr = 0.8 + Math.sin(a * 5 + t.seed) * 0.04 + Math.sin(a * 11 + t.seed * 2) * 0.02;
+        // 밟은 만큼 한쪽이 크게 떨어져 나간다
+        var chew = Math.cos(a - t.seed * 1.7);
+        if (wear > 0 && chew > 1 - wear * 1.1) rr *= 0.58;
+        var px = cx + Math.cos(a) * hw * rr, py = cy + Math.sin(a) * hh * rr;
+        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      var g = ctx.createRadialGradient(cx - hw * 0.2, cy - hh * 0.3, 2, cx, cy, hw * 0.85);
+      g.addColorStop(0, '#e8b076');
+      g.addColorStop(0.62, '#cd8f4f');
+      g.addColorStop(1, '#a86a33');
+      ctx.fillStyle = g; ctx.fill();
+      ctx.strokeStyle = 'rgba(112,64,22,.55)'; ctx.lineWidth = 1.4; ctx.stroke();
+
+      // 더 진하게 구워진 테두리 띠
+      ctx.strokeStyle = 'rgba(150,88,34,.35)'; ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, hw * 0.66, hh * 0.66, 0, 0, 6.2832);
+      ctx.stroke();
+
+      // 초코칩 — 밟을수록 하나씩 떨어져 나간다
+      var chips = [[-0.3, -0.12, 5.6], [0.24, -0.3, 4.8], [0.34, 0.16, 5.2],
+                   [-0.08, 0.3, 4.4], [0.02, -0.02, 6], [-0.38, 0.22, 4]];
+      var left = Math.max(2, Math.round(chips.length * (1 - wear)));
+      for (var c = 0; c < left; c++) {
+        var ch = chips[c];
+        var bx = cx + ch[0] * hw, by = cy + ch[1] * hh, br = ch[2];
+        ctx.fillStyle = 'rgba(60,32,14,.35)';
+        ctx.beginPath(); ctx.ellipse(bx + 1.2, by + br * 0.4, br, br * 0.5, 0, 0, 6.2832); ctx.fill();
+        var cg = ctx.createRadialGradient(bx - br * 0.3, by - br * 0.4, 0.5, bx, by, br);
+        cg.addColorStop(0, '#6b4226');
+        cg.addColorStop(1, '#3a2010');
+        ctx.fillStyle = cg;
+        ctx.beginPath(); ctx.ellipse(bx, by, br, br * 0.72, 0.3, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = 'rgba(255,224,190,.55)';
+        ctx.beginPath(); ctx.ellipse(bx - br * 0.28, by - br * 0.3, br * 0.24, br * 0.16, -0.4, 0, 6.2832); ctx.fill();
+      }
+
+      // 표면의 기포 자국과 부스러기 — 마른 과자의 결
+      for (var s = 0; s < 14; s++) {
+        var sa = t.seed * 2.7 + s * 2.399, sr = Math.sqrt((s % 7) / 7) * 0.62;
+        ctx.fillStyle = s % 3 ? 'rgba(122,72,30,.3)' : 'rgba(255,226,182,.5)';
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(sa) * hw * sr, cy + Math.sin(sa) * hh * sr, 1.3, 0, 6.2832);
+        ctx.fill();
+      }
+
+      // 떨어져 나간 자리에 남는 부스러기
+      if (wear > 0) {
+        for (var b = 0; b < Math.round(wear * 7); b++) {
+          var ba = t.seed * 1.7 + b * 1.1;
+          ctx.fillStyle = 'rgba(178,116,56,.85)';
+          ctx.beginPath();
+          ctx.arc(cx + Math.cos(ba) * hw * 0.84, cy + Math.sin(ba) * hh * 0.84, 1.6 + (b % 2), 0, 6.2832);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    },
+
+    /* 스티로폼: 눌러 붙은 알갱이. 알갱이 사이 틈이 보여야 '뽀드득'이 예상된다 */
     foam: function (ctx, t, m, cx, cy, hw, hh) {
       ctx.save();
-      for (var k = 0; k < 30; k++) {
+
+      // 알갱이 사이의 그늘 — 먼저 깔아야 알갱이가 '붙어 있는' 것으로 보인다
+      ctx.fillStyle = 'rgba(176,176,158,.55)';
+      diamond(ctx, cx, cy, 0.94, 0.94); ctx.fill();
+
+      for (var k = 0; k < 34; k++) {
         var a = t.seed * 1.1 + k * 2.399;
-        var rad = Math.sqrt((k % 12) / 12) * 0.78;
+        var rad = Math.sqrt((k % 13) / 13) * 0.8;
         var px = cx + Math.cos(a) * hw * rad, py = cy + Math.sin(a) * hh * rad;
-        var r = 3.6 + (k % 3) * 1.2;
-        ctx.fillStyle = 'rgba(255,255,255,.96)';
+        var r = 3.4 + (k % 3) * 1.3;
+
+        ctx.fillStyle = 'rgba(150,150,130,.35)';
+        ctx.beginPath(); ctx.arc(px + 0.8, py + r * 0.3, r, 0, 6.2832); ctx.fill();
+
+        var bg = ctx.createRadialGradient(px - r * 0.35, py - r * 0.4, 0.4, px, py, r);
+        bg.addColorStop(0, 'rgba(255,255,255,1)');
+        bg.addColorStop(0.7, 'rgba(248,248,240,1)');
+        bg.addColorStop(1, 'rgba(218,218,204,1)');
+        ctx.fillStyle = bg;
         ctx.beginPath(); ctx.arc(px, py, r, 0, 6.2832); ctx.fill();
-        ctx.strokeStyle = 'rgba(150,150,128,.42)'; ctx.lineWidth = 0.9; ctx.stroke();
+
+        // 알갱이 꼭대기의 점 하이라이트
+        ctx.fillStyle = 'rgba(255,255,255,.9)';
+        ctx.beginPath(); ctx.arc(px - r * 0.3, py - r * 0.35, r * 0.28, 0, 6.2832); ctx.fill();
       }
       ctx.restore();
     },
 
-    /* 종이: 어긋나게 겹친 낱장 + 밟을수록 늘어나는 구김 */
+    /* 종이: 어긋나게 겹친 낱장 + 밟을수록 깊어지는 구김.
+       구김은 '접힌 선 + 그 선을 따라 밝아지는 면'이다. 선만 그으면 낙서가 된다 */
     paper: function (ctx, t, m, cx, cy, hw, hh) {
       ctx.save();
-      ctx.fillStyle = 'rgba(252,246,230,.95)';
-      ctx.save(); ctx.translate(-3.5, -2.5); diamond(ctx, cx, cy, 0.84, 0.84); ctx.fill(); ctx.restore();
-      ctx.fillStyle = 'rgba(255,255,250,.98)';
+
+      // 밑장 — 어긋난 자리마다 그늘이 있어야 '여러 장'으로 보인다
+      for (var L = 2; L >= 1; L--) {
+        ctx.save();
+        ctx.translate(-L * 4.5, -L * 2.5);
+        ctx.fillStyle = 'rgba(120,104,72,.35)';
+        diamond(ctx, cx + 1.5, cy + 1.5, 0.86 - L * 0.01, 0.86 - L * 0.01); ctx.fill();
+        ctx.fillStyle = L === 2 ? 'rgba(226,214,186,1)' : 'rgba(240,231,206,1)';
+        diamond(ctx, cx, cy, 0.86 - L * 0.01, 0.86 - L * 0.01); ctx.fill();
+        ctx.restore();
+      }
+
+      // 맨 윗장
+      var g = ctx.createLinearGradient(cx - hw, cy - hh, cx + hw, cy + hh);
+      g.addColorStop(0, '#ffffff');
+      g.addColorStop(0.6, '#fffdf4');
+      g.addColorStop(1, '#f2e9d2');
+      ctx.fillStyle = g;
       diamond(ctx, cx, cy, 0.8, 0.8); ctx.fill();
-      ctx.strokeStyle = 'rgba(150,132,90,.5)'; ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(150,132,90,.55)'; ctx.lineWidth = 1;
       diamond(ctx, cx, cy, 0.8, 0.8); ctx.stroke();
 
-      var folds = 3 + t.damage * 2;
-      ctx.strokeStyle = 'rgba(146,124,76,.42)'; ctx.lineWidth = 1.1; ctx.lineCap = 'round';
+      // 구김 — 접힌 선은 꺾인 V 다. 한쪽 면은 빛을 받고 다른 면은 그늘진다
+      var folds = 2 + t.damage;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       for (var k = 0; k < folds; k++) {
-        var a = t.seed + k * 1.27;
+        var a = t.seed + k * 1.9;
+        var x0 = cx + Math.cos(a) * hw * 0.46, y0 = cy + Math.sin(a) * hh * 0.46;
+        var xm = cx + Math.cos(a + 1.3) * hw * 0.16, ym = cy + Math.sin(a + 1.3) * hh * 0.16;
+        var x1 = cx + Math.cos(a + 2.6) * hw * 0.42, y1 = cy + Math.sin(a + 2.6) * hh * 0.42;
+
+        // 접힌 선을 따라 한쪽 면이 들려 밝아진다
+        ctx.fillStyle = 'rgba(255,255,255,.5)';
         ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(a) * hw * 0.6, cy + Math.sin(a) * hh * 0.6);
-        ctx.lineTo(cx + Math.cos(a + 2.1) * hw * 0.46, cy + Math.sin(a + 2.1) * hh * 0.46);
-        ctx.stroke();
+        ctx.moveTo(x0, y0); ctx.lineTo(xm, ym); ctx.lineTo(x1, y1);
+        ctx.lineTo(x1, y1 - 3.5); ctx.lineTo(xm, ym - 4.5); ctx.lineTo(x0, y0 - 3.5);
+        ctx.closePath(); ctx.fill();
+
+        ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(x0, y0 - 1); ctx.lineTo(xm, ym - 1); ctx.lineTo(x1, y1 - 1); ctx.stroke();
+        ctx.strokeStyle = 'rgba(150,126,78,.5)'; ctx.lineWidth = 1.1;
+        ctx.beginPath(); ctx.moveTo(x0, y0 + 0.8); ctx.lineTo(xm, ym + 0.8); ctx.lineTo(x1, y1 + 0.8); ctx.stroke();
       }
+
+      // 들린 모서리 — 종이는 절대 완전히 눕지 않는다
+      ctx.fillStyle = 'rgba(255,255,255,.95)';
+      ctx.beginPath();
+      ctx.moveTo(cx + hw * 0.62, cy + hh * 0.06);
+      ctx.quadraticCurveTo(cx + hw * 0.5, cy - hh * 0.2, cx + hw * 0.3, cy - hh * 0.3);
+      ctx.quadraticCurveTo(cx + hw * 0.56, cy - hh * 0.12, cx + hw * 0.62, cy + hh * 0.06);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(160,140,96,.5)'; ctx.lineWidth = 0.9; ctx.stroke();
       ctx.restore();
     },
 
-    /* 얼음: 속이 비치는 판 + 갇힌 기포 + 결빙선 */
+    /* 얼음: 속이 비치는 판 + 갇힌 기포 + 결빙선.
+       얼음은 '파란 유리'가 아니라 **하얗게 서린 면과 투명한 면이 섞인 것**이다 */
     ice: function (ctx, t, m, cx, cy, hw, hh) {
       ctx.save();
-      var g = ctx.createLinearGradient(cx - hw, cy - hh, cx + hw, cy + hh);
-      g.addColorStop(0, 'rgba(255,255,255,.72)');
-      g.addColorStop(0.5, 'rgba(190,232,248,.45)');
-      g.addColorStop(1, 'rgba(126,192,222,.6)');
-      ctx.fillStyle = g;
-      diamond(ctx, cx, cy, 0.9, 0.9); ctx.fill();
 
-      // 얼음판을 가로지르는 결빙선
-      ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
-      for (var k = 0; k < 3; k++) {
-        var a = t.seed * 0.7 + k * 1.05;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(a) * hw * 0.74, cy + Math.sin(a) * hh * 0.74);
-        ctx.lineTo(cx - Math.cos(a + 0.4) * hw * 0.68, cy - Math.sin(a + 0.4) * hh * 0.68);
-        ctx.stroke();
+      var g = ctx.createLinearGradient(cx - hw, cy - hh, cx + hw, cy + hh);
+      g.addColorStop(0, 'rgba(255,255,255,.82)');
+      g.addColorStop(0.45, 'rgba(186,230,248,.5)');
+      g.addColorStop(1, 'rgba(110,182,214,.62)');
+      ctx.fillStyle = g;
+      diamond(ctx, cx, cy, 0.92, 0.92); ctx.fill();
+
+      // 서리 낀 구역 — 반투명 면이 섞여야 유리와 구분된다
+      for (var f = 0; f < 3; f++) {
+        var fa = t.seed * 1.3 + f * 2.1;
+        var fx = cx + Math.cos(fa) * hw * 0.3, fy = cy + Math.sin(fa) * hh * 0.3;
+        var fg = ctx.createRadialGradient(fx, fy, 1, fx, fy, hw * 0.4);
+        fg.addColorStop(0, 'rgba(255,255,255,.55)');
+        fg.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = fg;
+        ctx.beginPath(); ctx.ellipse(fx, fy, hw * 0.4, hh * 0.4, 0, 0, 6.2832); ctx.fill();
       }
-      // 안에 갇힌 기포
+
+      // 균열 — 가운데에서 꺾이며 뻗는다. 직선 여러 줄은 긁힌 자국으로 보인다.
+      // 밝은 심 + 그 옆의 짙은 그늘이 한 쌍이어야 '갈라진 틈'이 된다
+      var lines = 2 + t.damage;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (var k = 0; k < lines; k++) {
+        var a = t.seed * 0.7 + k * 1.7;
+        var pts = [[cx + Math.cos(a) * hw * 0.8, cy + Math.sin(a) * hh * 0.8]];
+        for (var seg = 1; seg <= 3; seg++) {
+          var sa = a + Math.PI + (((k + seg) % 3) - 1) * 0.5;
+          var sr = 0.8 - seg * 0.27;
+          pts.push([cx + Math.cos(sa) * hw * sr * (seg % 2 ? -1 : 1),
+                    cy + Math.sin(sa) * hh * sr * (seg % 2 ? -1 : 1)]);
+        }
+        for (var pass = 0; pass < 2; pass++) {
+          ctx.strokeStyle = pass ? 'rgba(255,255,255,.95)' : 'rgba(44,112,150,.55)';
+          ctx.lineWidth = pass ? 1.8 : 3.4;
+          ctx.beginPath();
+          ctx.moveTo(pts[0][0], pts[0][1] + (pass ? 0 : 1.4));
+          for (var q = 1; q < pts.length; q++) ctx.lineTo(pts[q][0], pts[q][1] + (pass ? 0 : 1.4));
+          ctx.stroke();
+        }
+      }
+
+      // 안에 갇힌 기포 — 위쪽이 밝은 작은 구
       for (var b = 0; b < 6; b++) {
         var ba = t.seed * 1.9 + b * 1.31;
         var br = 0.18 + (b % 3) * 0.2;
-        ctx.fillStyle = 'rgba(255,255,255,.75)';
-        ctx.beginPath();
-        ctx.ellipse(cx + Math.cos(ba) * hw * br, cy + Math.sin(ba) * hh * br,
-          1.8 + (b % 2), 1.3 + (b % 2) * 0.6, 0, 0, 6.2832);
-        ctx.fill();
+        var bx = cx + Math.cos(ba) * hw * br, by = cy + Math.sin(ba) * hh * br;
+        var rr = 1.8 + (b % 2);
+        ctx.fillStyle = 'rgba(255,255,255,.85)';
+        ctx.beginPath(); ctx.ellipse(bx, by, rr, rr * 0.72, 0, 0, 6.2832); ctx.fill();
+        ctx.strokeStyle = 'rgba(92,150,180,.5)'; ctx.lineWidth = 0.7; ctx.stroke();
       }
+
+      // 표면 반사 — 얼음은 늘 젖어 있다
+      ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - hw * 0.42, cy - hh * 0.16);
+      ctx.quadraticCurveTo(cx - hw * 0.1, cy - hh * 0.36, cx + hw * 0.26, cy - hh * 0.2);
+      ctx.stroke();
       ctx.restore();
     }
   };

@@ -18,7 +18,7 @@ VALID_SUBJECTS = {'social', 'math'}
 VALID_MATERIALS = {
     'keycap', 'cotton', 'jelly', 'leaf', 'bubble', 'wood',
     'slime', 'orbeez', 'sand', 'glass', 'snow', 'sponge',
-    'water', 'gravel', 'moss', 'foam', 'paper', 'ice',
+    'water', 'gravel', 'cookie', 'foam', 'paper', 'ice',
 }
 
 # 가장 작은 격자(4x4 = 16칸)에서 캐릭터 시작 칸을 뺀 값

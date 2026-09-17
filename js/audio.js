@@ -636,21 +636,29 @@ SK.Audio = (function () {
       });
     },
 
-    /* 이끼 — 젖은 솜. 공기와 물기가 함께 빠져나간다 */
-    moss: function (d, D, i, r, t) {
-      var g = 0.112 + 0.145 * i;
-      noiseVoice({
-        dest: d, t: t, filter: 'lowpass', freq: 760 * r, freqEnd: 260 * r,
-        q: 0.6, gain: g, dur: 0.18, attack: 0.02
-      });
+    /* 쿠키 — 바삭. 마른 과자가 '딱' 하고 쪼개진 뒤 부스러기가 흩어진다.
+       쪼개짐(짧고 날카로운 트랜지언트)이 없으면 그냥 모래가 된다 */
+    cookie: function (d, D, i, r, t) {
+      var g = 0.354 + 0.46 * i;
+
+      // 1) 쪼개지는 순간 — 2ms 짜리 날카로운 딱
+      noiseVoice({ dest: d, t: t, filter: 'highpass', freq: 3600, gain: g * 0.9, dur: 0.004, attack: 0.0004 });
+      noiseVoice({ dest: d, t: t + 0.001, filter: 'bandpass', freq: 2100 * r, q: 2.2, gain: g * 0.7, dur: 0.012 });
+
+      // 2) 과자 몸통 — 짧게 끊겨야 '마른' 것으로 들린다
       modalVoice({
-        dest: d, t: t, base: 88 * r, gain: g * 0.8, jitter: 0.03,
-        modes: [{ f: 1.00, d: 0.2, g: 1.0, a: 0.012 }, { f: 1.81, d: 0.1, g: 0.28 }]
+        dest: d, t: t, base: 430 * r, gain: g * 0.6, jitter: 0.04,
+        modes: [{ f: 1.00, d: 0.035, g: 1.0 }, { f: 2.38, d: 0.02, g: 0.4 }, { f: 4.1, d: 0.012, g: 0.15 }]
       });
+
+      // 3) 이어서 부스러지는 결 — 낙엽보다 알갱이가 굵고 성기다
       granular({
-        dests: D, t: t + 0.012, count: 12, span: 0.16,
-        freq: [900, 3600], q: 2.6, gain: g * 0.14, grain: [0.005, 0.02], decay: 1.3
+        dests: D, t: t + 0.008, count: 16, span: 0.16,
+        freq: [1800 * r, 7200 * r], q: 3.4, gain: g * 0.5, grain: [0.004, 0.016], decay: 1.4
       });
+
+      // 4) 발밑으로 전해지는 낮은 둔탁함
+      toneVoice({ dest: d, t: t, freq: 148 * r, freqEnd: 92 * r, type: 'sine', gain: g * 0.3, dur: 0.06, lp: 320 });
     },
 
     /* 스티로폼 — 알갱이가 비벼지는 높고 마른 끼익.

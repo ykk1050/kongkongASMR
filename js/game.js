@@ -18,8 +18,8 @@ SK.Game = (function () {
   var AMBIENT_MATS = [
     'wood', 'keycap', 'cotton', 'leaf', 'bubble', 'sand',
     'snow', 'glass', 'sponge', 'slime', 'orbeez', 'water',
-    'gravel', 'moss', 'foam', 'paper', 'ice', 'wood',
-    'gravel', 'water', 'moss', 'ice', 'paper', 'foam'
+    'gravel', 'cookie', 'foam', 'paper', 'ice', 'wood',
+    'gravel', 'water', 'cookie', 'ice', 'paper', 'foam'
   ];
 
   function ambientMat(i, j) {
