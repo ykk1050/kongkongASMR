@@ -16,9 +16,10 @@ SK.Game = (function () {
 
   // 배경 바닥 재질 — 밟을 때마다 소리가 달라지도록 섞는다
   var AMBIENT_MATS = [
-    'wood', 'wood', 'keycap', 'cotton', 'leaf', 'bubble',
-    'sand', 'snow', 'glass', 'sponge', 'slime', 'orbeez',
-    'wood', 'sand', 'bubble', 'snow'
+    'wood', 'keycap', 'cotton', 'leaf', 'bubble', 'sand',
+    'snow', 'glass', 'sponge', 'slime', 'orbeez', 'water',
+    'gravel', 'moss', 'foam', 'paper', 'ice', 'wood',
+    'gravel', 'water', 'moss', 'ice', 'paper', 'foam'
   ];
 
   function ambientMat(i, j) {
@@ -120,8 +121,14 @@ SK.Game = (function () {
    *    · 남은 타일이 **하나로 이어져 있어야** 한다 — 섬이 생기면 문제 글자를
    *      영영 못 밟는 판이 만들어진다. 그래서 구멍을 하나 뚫을 때마다
    *      연결성을 검사하고, 끊기면 되돌린다.
+   *    · 구멍끼리 붙여 뚫지 않는다 — 두세 칸이 이어져 비면 건너뛸 수 없는 벽이
+   *      생겨, 연결은 되어 있어도 빙 돌아가야 하는 판이 된다.
    */
   var HOLE_RATIO = 0.16;
+
+  /* 밟아서 부서지는 자리까지 더해도 이만큼은 성한 발판으로 남긴다 —
+     글자를 놓을 자리가 모자라면 문제를 풀 수가 없다. */
+  var MIN_SOLID = 10;
 
   function buildWorld() {
     tiles = []; tileAt = {};
@@ -170,7 +177,7 @@ SK.Game = (function () {
     for (var n = 0; n < cand.length && want > 0; n++) {
       var c = cand[n], key = c.i + ',' + c.j;
       var t = tileAt[key];
-      if (!t) continue;
+      if (!t || touchesHole(c.i, c.j)) continue;
       delete tileAt[key];
       if (allConnected()) {
         tiles.splice(tiles.indexOf(t), 1);                // 진짜로 없앤다
@@ -179,6 +186,17 @@ SK.Game = (function () {
         tileAt[key] = t;                                  // 섬이 생기면 되돌린다
       }
     }
+  }
+
+  /** 이 칸이 이미 뚫린 구멍과 맞닿아 있는가 (8방향) */
+  function touchesHole(i, j) {
+    var DIRS = SK.Player.DIRS;
+    for (var d = 0; d < DIRS.length; d++) {
+      var ni = i + DIRS[d].di, nj = j + DIRS[d].dj;
+      if (!inBounds(ni, nj)) continue;                  // 보드 밖은 구멍이 아니다
+      if (!tileAt[ni + ',' + nj]) return true;
+    }
+    return false;
   }
 
   function getTile(i, j) { return tileAt[i + ',' + j] || null; }
@@ -205,14 +223,13 @@ SK.Game = (function () {
     renderHUD(true);
   }
 
-  /** 문제 타일을 바닥에 뿌린다 */
+  /** 문제 타일을 바닥에 뿌린다 — 밟힌 흔적과 균열은 그대로 둔다 */
   function layoutQuiz(q) {
     for (var k = 0; k < quizTiles.length; k++) {
       var old = quizTiles[k];
       old.label = null; old.role = 'plain'; old.payload = null;
-      old.state = 'idle'; old.hi = 0; old.order = -1; old.correct = false;
+      old.state = 'idle'; old.order = -1; old.correct = false;
       old.mat = ambientMat(old.i, old.j);
-      SK.Tiles.reset(old);
     }
     quizTiles = [];
 
@@ -229,9 +246,7 @@ SK.Game = (function () {
       t.order = it.order;
       t.correct = it.correct;
       t.state = 'idle';
-      t.hi = 0;
       t.mat = q.material;
-      SK.Tiles.reset(t);
       quizTiles.push(t);
     }
   }
@@ -242,7 +257,7 @@ SK.Game = (function () {
     for (var i = 0; i < GRID; i++) {
       for (var j = 0; j < GRID; j++) {
         if (player && i === player.ci && j === player.cj) continue;
-        if (!getTile(i, j)) continue;          // 구멍에는 글자를 놓을 수 없다
+        if (!SK.Tiles.isSolid(getTile(i, j))) continue;   // 구멍·부서진 자리에는 못 놓는다
         cand.push({ i: i, j: j });
       }
     }
@@ -778,9 +793,8 @@ SK.Game = (function () {
       SK.Particles.trail(player.x, player.y, player.z * 0.9, player.power);
     }
 
-    for (var i = 0; i < tiles.length; i++) SK.Tiles.update(tiles[i], dt, now);
+    for (var i = 0; i < tiles.length; i++) SK.Tiles.update(tiles[i], dt);
     updateAim(dt);
-    updateHints(dt);
 
     // 카메라 — 보드 중심에서 캐릭터 쪽으로 조금만 따라간다
     var bc = world((GRID - 1) / 2, (GRID - 1) / 2, 0);
@@ -808,7 +822,7 @@ SK.Game = (function () {
       var nj = player.cj + player.aimDir.dj;
       if (worldApi.canEnter(ni, nj)) {
         target = getTile(ni, nj);
-        if (!target) holeTarget = { i: ni, j: nj };
+        if (!SK.Tiles.isSolid(target)) { target = null; holeTarget = { i: ni, j: nj }; }
       }
     }
     if (holeTarget) { holeAim.i = holeTarget.i; holeAim.j = holeTarget.j; }
@@ -822,27 +836,17 @@ SK.Game = (function () {
     }
   }
 
-  function updateHints(dt) {
-    var show = fsm && fsm.quiz && fsm.mistakes >= 2 && phase === 'play';
-    var exp = show ? fsm.expected() : null;
-    for (var k = 0; k < quizTiles.length; k++) {
-      var t = quizTiles[k];
-      var want = (exp != null && t.payload === exp) ? 1 : 0;
-      t.hi += (want - t.hi) * Math.min(1, dt * 6);
-      if (t.hi < 0.01) t.hi = 0;
-    }
-  }
-
   /* =========================================================
    *  착지 — 소리와 시각 효과를 항상 함께 낸다
    * ======================================================= */
   function land(intensity, power, i, j) {
     var t = getTile(i, j);
-    if (!t) { fallIntoHole(i, j); return; }
+    // 부서진 자리는 구멍과 같다 — 되살아나지 않으므로 딛고 설 수 없다
+    if (!SK.Tiles.isSolid(t)) { fallIntoHole(i, j); return; }
     var mat = t.mat;
     var pan = panOf(i, j), depth = depthOf(i, j);
 
-    var res = SK.Tiles.stomp(t, intensity, now, power);
+    var res = SK.Tiles.stomp(t, intensity, power, canBreak(t));
 
     switch (res.sound) {
       case 'shatter':
@@ -872,6 +876,77 @@ SK.Game = (function () {
     }
 
     visit(t);
+
+    // 부서진 타일은 되살아나지 않는다. 글자는 성한 칸으로 옮겨 준다.
+    // 이미 밟은 글자도 옮겨야 한다 — 틀리면 진행이 처음으로 돌아가 다시 밟아야 하므로.
+    if (res.sound === 'shatter' && t.role === 'seq') relocateLabel(t);
+  }
+
+  /**
+   * 이 타일이 사라져도 판이 하나로 이어져 있는가.
+   * 구멍은 처음 뚫을 때 연결성을 보장하지만(carveHoles), 밟아서 부서지는 자리는
+   * 그 보장을 무너뜨린다. 되살아나지도 않으므로, 끊길 자리는 아예 안 부서지게 한다.
+   */
+  function canBreak(t) {
+    return solidConnected(t) && solidCount() - 1 >= MIN_SOLID;
+  }
+
+  function solidCount() {
+    var n = 0;
+    for (var k = 0; k < tiles.length; k++) if (SK.Tiles.isSolid(tiles[k])) n++;
+    return n;
+  }
+
+  /** 성한 타일만으로 8방향 연결이 유지되는가 (except 는 없는 셈 친다) */
+  function solidConnected(except) {
+    var alive = Object.create(null), total = 0, start = null;
+    for (var k = 0; k < tiles.length; k++) {
+      var t = tiles[k];
+      if (t === except || !SK.Tiles.isSolid(t)) continue;
+      alive[t.i + ',' + t.j] = true; total++;
+      if (start === null) start = t.i + ',' + t.j;
+    }
+    if (!total) return false;
+
+    var seen = Object.create(null), queue = [start], reached = 0;
+    seen[start] = true;
+    var DIRS = SK.Player.DIRS;
+    while (queue.length) {
+      var parts = queue.pop().split(',');
+      reached++;
+      for (var d = 0; d < DIRS.length; d++) {
+        var key = (+parts[0] + DIRS[d].di) + ',' + (+parts[1] + DIRS[d].dj);
+        if (alive[key] && !seen[key]) { seen[key] = true; queue.push(key); }
+      }
+    }
+    return reached === total;
+  }
+
+  /** 글자가 얹힌 타일이 부서졌을 때 — 타일을 되살리는 대신 글자만 이사시킨다 */
+  function relocateLabel(t) {
+    var slot = quizTiles.indexOf(t);
+    if (slot < 0) return;
+
+    var cand = [];
+    for (var k = 0; k < tiles.length; k++) {
+      var o = tiles[k];
+      if (o === t || o.label || o.damage > 0 || !SK.Tiles.isSolid(o)) continue;
+      if (o.i === player.ci && o.j === player.cj) continue;
+      cand.push(o);
+    }
+    if (!cand.length) return;
+
+    var to = SK.Quiz.shuffle(cand)[0];
+    to.label = t.label; to.payload = t.payload; to.mat = t.mat;
+    to.role = 'seq'; to.order = t.order; to.correct = t.correct; to.state = t.state;
+    quizTiles[slot] = to;
+
+    t.label = null; t.payload = null; t.role = 'plain'; t.order = -1; t.correct = false;
+    t.state = 'idle';
+
+    // 어디로 옮겨 갔는지 보이지 않으면 글자를 잃어버린 것처럼 느껴진다
+    SK.Particles.stars(to.i, to.j, 12);
+    SK.Particles.ring(to.i, to.j, { size: 110, life: 0.5, width: 3, color: 'rgba(255,255,255,' });
   }
 
   /** 구멍 조준 표시 — 붉은 점선과 아래로 떨어지는 화살표 */
@@ -931,8 +1006,9 @@ SK.Game = (function () {
     setFlash(0.22, 352);
 
     // 직전에 서 있던 발판으로 돌려보낸다. 그 자리도 사라졌다면 가장 가까운 타일로.
-    var back = getTile(player.fromI, player.fromJ) ? { i: player.fromI, j: player.fromJ }
-                                                   : nearestTile(i, j);
+    var back = SK.Tiles.isSolid(getTile(player.fromI, player.fromJ))
+      ? { i: player.fromI, j: player.fromJ }
+      : nearestSolid(i, j);
     player.ci = back.i; player.cj = back.j;
     player.x = back.i; player.y = back.j; player.z = 0;
     player.fromI = back.i; player.fromJ = back.j;
@@ -944,11 +1020,12 @@ SK.Game = (function () {
     renderHUD(false, true);
   }
 
-  /** 주어진 칸에서 가장 가까운 실제 타일 */
-  function nearestTile(i, j) {
+  /** 주어진 칸에서 가장 가까운 성한 타일 — 부서진 자리로 돌려보내면 다시 떨어진다 */
+  function nearestSolid(i, j) {
     var best = null, bestD = Infinity;
     for (var k = 0; k < tiles.length; k++) {
       var t = tiles[k];
+      if (!SK.Tiles.isSolid(t)) continue;
       var d = (t.i - i) * (t.i - i) + (t.j - j) * (t.j - j);
       if (d < bestD) { bestD = d; best = t; }
     }
@@ -972,9 +1049,6 @@ SK.Game = (function () {
     if (r.type === 'progress' || r.type === 'solved') {
       t.state = 'done';
       t.flash = 1;
-      // 정답 타일은 별빛과 함께 원래대로 복구된다 —
-      // 소모성 재질이라도 정답 진행이 막히는 일이 없도록.
-      SK.Tiles.reset(t);
       SK.Particles.solveMark(t.i, t.j);
       SK.Particles.stars(t.i, t.j, 26);
       SK.Particles.ring(t.i, t.j, { size: 105, life: 0.45, width: 4, color: 'rgba(142,240,192,' });
@@ -1229,9 +1303,17 @@ SK.Game = (function () {
       /** 지금 조준 표시가 켜진 타일 수 (0 또는 1) */
       /** 임의의 칸 재질 읽기/바꾸기 — 특정 재질의 연출을 확인할 때 쓴다 */
       matOf: function (i, j) { var t = getTile(i, j); return t && t.mat; },
+      /** 한 칸의 마모 상태 — 부서진 타일이 되살아나지 않는지 확인할 때 쓴다 */
+      tileState: function (i, j) {
+        var t = getTile(i, j);
+        if (!t) return null;
+        return { mat: t.mat, damage: t.damage, broken: t.broken, label: t.label, solid: SK.Tiles.isSolid(t) };
+      },
+      solidCount: solidCount,
+      solidConnected: function () { return solidConnected(null); },
       setMat: function (i, j, mat) {
         var t = getTile(i, j);
-        if (t) { t.mat = mat; SK.Tiles.reset(t); }
+        if (t) t.mat = mat;
         return t && t.mat;
       },
       input: function () {
