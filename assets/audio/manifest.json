@@ -105,6 +105,16 @@
         "paper_4.wav"
       ],
       "gain": 1.37
+    },
+    "step_ice": {
+      "files": [
+        "ice_1.wav",
+        "ice_2.wav",
+        "ice_3.wav",
+        "ice_4.wav",
+        "ice_5.wav"
+      ],
+      "gain": 1.37
     }
   }
 }
