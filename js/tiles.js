@@ -30,96 +30,96 @@ SK.Tiles = (function () {
    */
   var MATERIALS = {
     keycap: {
-      label: '키캡', sound: '톡', klass: 'elastic', durability: 0,
+      label: '키캡', sound: '톡', klass: 'elastic', durability: 0, ring: 0.14,
       top: '#eef0fa', topDark: '#c3c9e2', side: '#9aa2c2', side2: '#7d85a6',
       ink: '#2a2f52', glow: '#dfe4ff', thick: 1.05, squish: 0.5, art: 'keycap'
     },
     cotton: {
-      label: '솜', sound: '포옥', klass: 'elastic', durability: 0,
+      label: '솜', sound: '포옥', klass: 'elastic', durability: 0, ring: 0.5,
       top: '#ffdcec', topDark: '#eaa8c8', side: '#d492b1', side2: '#b87796',
       ink: '#5b2340', glow: '#ffc9de', thick: 0.95, squish: 1.05, art: 'cotton'
     },
     jelly: {
-      label: '젤리', sound: '통', klass: 'elastic', durability: 0,
+      label: '젤리', sound: '통', klass: 'elastic', durability: 0, ring: 0.45,
       top: '#a9f7d3', topDark: '#4fcf99', side: '#37b783', side2: '#25946a',
       ink: '#093221', glow: '#8ef0c0', thick: 1.15, squish: 1.3, art: 'jelly'
     },
     leaf: {
-      label: '낙엽', sound: '바스락', klass: 'consumable', durability: 4,
+      label: '낙엽', sound: '바스락', klass: 'consumable', durability: 4, ring: 0.3,
       top: '#c9a273', topDark: '#a37c4d', side: '#8a6740', side2: '#6d5133',
       ink: '#33200a', glow: '#ffb267', thick: 0.62, squish: 0.35, art: 'leaf'
     },
     bubble: {
-      label: '에어캡', sound: '뽁', klass: 'consumable', durability: 4,
+      label: '에어캡', sound: '뽁', klass: 'consumable', durability: 4, ring: 0.22,
       top: '#dff4ff', topDark: '#a9ddf5', side: '#7fbfe0', side2: '#5b9ec2',
       ink: '#123a52', glow: '#a8e8ff', thick: 0.8, squish: 0.5, art: 'bubble'
     },
     wood: {
-      label: '나무', sound: '탁', klass: 'elastic', durability: 0,
+      label: '나무', sound: '탁', klass: 'elastic', durability: 0, ring: 0.2,
       top: '#dcb488', topDark: '#bb9061', side: '#9d7549', side2: '#7d5c39',
       ink: '#3b2510', glow: '#e8c9a0', thick: 0.88, squish: 0.22, art: 'wood'
     },
 
     /* ---- 확장 재질 ---- */
     slime: {
-      label: '슬라임', sound: '찌걱', klass: 'elastic', durability: 0,
+      label: '슬라임', sound: '찌걱', klass: 'elastic', durability: 0, ring: 0.5,
       top: '#c9b0ff', topDark: '#8f6fe0', side: '#7a5bc7', side2: '#5f45a3',
       ink: '#2a1656', glow: '#d9c4ff', thick: 0.9, squish: 1.45, art: 'slime'
     },
     orbeez: {
-      label: '구슬볼', sound: '톡톡', klass: 'consumable', durability: 4,
+      label: '구슬볼', sound: '톡톡', klass: 'consumable', durability: 4, ring: 0.32,
       top: '#ffe0ef', topDark: '#f2a8cb', side: '#d98cb0', side2: '#b56f92',
       ink: '#4a1030', glow: '#ffd0e6', thick: 0.85, squish: 0.9, art: 'orbeez'
     },
     sand: {
-      label: '모래', sound: '사각', klass: 'consumable', durability: 4,
+      label: '모래', sound: '사각', klass: 'consumable', durability: 4, ring: 0.35,
       top: '#f5ead0', topDark: '#d9c9a4', side: '#b9a77f', side2: '#978764',
       ink: '#3d2f12', glow: '#ffeec2', thick: 0.55, squish: 0.6, art: 'sand'
     },
     glass: {
-      label: '유리구슬', sound: '챠랑', klass: 'elastic', durability: 0,
+      label: '유리구슬', sound: '챠랑', klass: 'elastic', durability: 0, ring: 1.1,
       top: '#d8f2ff', topDark: '#9cd4ee', side: '#7bb8d6', side2: '#5c95b3',
       ink: '#0d3446', glow: '#e8faff', thick: 1.0, squish: 0.35, art: 'glass'
     },
     snow: {
-      label: '눈', sound: '뽀득', klass: 'consumable', durability: 4,
+      label: '눈', sound: '뽀득', klass: 'consumable', durability: 4, ring: 0.4,
       top: '#ffffff', topDark: '#d7e6f5', side: '#b9cde0', side2: '#9bb0c6',
       ink: '#274055', glow: '#ffffff', thick: 0.7, squish: 0.75, art: 'snow'
     },
     sponge: {
-      label: '스펀지', sound: '뽀드득', klass: 'elastic', durability: 0,
+      label: '스펀지', sound: '뽀드득', klass: 'elastic', durability: 0, ring: 0.42,
       top: '#ffc95e', topDark: '#e09a2c', side: '#c07f1f', side2: '#9a6516',
       ink: '#4a3306', glow: '#fff0bd', thick: 0.95, squish: 1.15, art: 'sponge'
     },
 
     /* ---- 확장 재질 2 ---- */
     water: {
-      label: '물웅덩이', sound: '찰방', klass: 'elastic', durability: 0,
+      label: '물웅덩이', sound: '찰방', klass: 'elastic', durability: 0, ring: 0.5,
       top: '#bdefff', topDark: '#69c6ea', side: '#4aa4cd', side2: '#3a85aa',
       ink: '#06344a', glow: '#dff7ff', thick: 0.45, squish: 1.35, art: 'water'
     },
     gravel: {
-      label: '자갈', sound: '자그락', klass: 'elastic', durability: 0,
+      label: '자갈', sound: '자그락', klass: 'elastic', durability: 0, ring: 0.3,
       top: '#ccd0d8', topDark: '#9ba1ad', side: '#848a97', side2: '#686e7a',
       ink: '#23262e', glow: '#e4e7ee', thick: 0.8, squish: 0.28, art: 'gravel'
     },
     cookie: {
-      label: '쿠키', sound: '바삭', klass: 'consumable', durability: 4,
+      label: '쿠키', sound: '바삭', klass: 'consumable', durability: 4, ring: 0.26,
       top: '#e0a76a', topDark: '#b87940', side: '#9a6231', side2: '#7c4e26',
       ink: '#3b2008', glow: '#ffd39a', thick: 0.72, squish: 0.3, art: 'cookie'
     },
     metal: {
-      label: '양철판', sound: '탱', klass: 'elastic', durability: 0,
+      label: '양철판', sound: '탱', klass: 'elastic', durability: 0, ring: 0.95,
       top: '#cfd8e0', topDark: '#94a3af', side: '#7c8b98', side2: '#5f6c78',
       ink: '#1d2830', glow: '#eaf4ff', thick: 0.62, squish: 0.12, art: 'metal'
     },
     paper: {
-      label: '종이', sound: '구깃', klass: 'consumable', durability: 4,
+      label: '종이', sound: '구깃', klass: 'consumable', durability: 4, ring: 0.3,
       top: '#fdf6e6', topDark: '#e4d6b6', side: '#c8b894', side2: '#a4956f',
       ink: '#4a3a16', glow: '#fff4d2', thick: 0.5, squish: 0.45, art: 'paper'
     },
     ice: {
-      label: '얼음', sound: '쩌억', klass: 'consumable', durability: 4,
+      label: '얼음', sound: '쩌억', klass: 'consumable', durability: 4, ring: 0.75,
       top: '#e4f8ff', topDark: '#9fd8ef', side: '#79b9d6', side2: '#5b96b4',
       ink: '#0a3a50', glow: '#eafcff', thick: 0.9, squish: 0.18, art: 'ice'
     }
@@ -235,7 +235,8 @@ SK.Tiles = (function () {
       if (Math.abs(t.press) < 0.002 && Math.abs(t.pressVel) < 0.02) { t.press = 0; t.pressVel = 0; }
     }
     if (t.wobble > 0) t.wobble = Math.max(0, t.wobble - dt * 2.2);
-    if (t.flash > 0) t.flash = Math.max(0, t.flash - dt * 3.4);
+    // 발광은 그 재질의 소리 꼬리만큼 남는다 — 금속·유리는 길게, 키캡·나무는 탁 끊긴다
+    if (t.flash > 0) t.flash = Math.max(0, t.flash - dt / (material(t.mat).ring || 0.3));
     if (t.mark > 0) t.mark = Math.max(0, t.mark - dt * 0.75);
   }
 
@@ -299,13 +300,39 @@ SK.Tiles = (function () {
     // 재질 고유의 표면 구조 — 여기서 "무슨 소리가 날지" 알 수 있다
     ART[m.art](ctx, t, m, sx, topY, hw, hh, now);
 
-    // 소리와 동기화된 발광
+    /* 소리와 동기화된 발광 + 표면을 가로지르는 접촉 파문.
+       소리는 '한 점에서 퍼져 나가는 것'인데 지금까지는 타일 전체가 한꺼번에
+       밝아지기만 했다. 밟은 자리에서 물결이 번져 나가면 귀로 듣는 것과
+       눈으로 보는 것이 같은 사건이 된다. 재질의 ring(소리 꼬리)에 맞춰 퍼진다. */
     if (t.flash > 0.01) {
       ctx.save();
-      ctx.globalAlpha = alpha * t.flash * 0.45;
+      ctx.globalAlpha = alpha * t.flash * 0.4;
       ctx.fillStyle = m.glow;
       diamond(ctx, sx, topY, 1 + wob, 1 + wob);
       ctx.fill();
+      ctx.restore();
+
+      /* 밝은 타일(눈·양철판·종이) 위에서는 밝은 선만으로는 묻힌다.
+         어두운 밑선을 먼저 깔아야 어느 재질 위에서든 파문이 보인다. */
+      var spread = 1 - t.flash;                    // 0 → 1 로 번진다
+      ctx.save();
+      diamond(ctx, sx, topY, 1, 1); ctx.clip();
+      var rx = sx + t.markX * hw, ry = topY + t.markY * hh;
+      for (var w = 0; w < 2; w++) {
+        var rr = (spread - w * 0.24) * 1.3;
+        if (rr <= 0.02) continue;
+        ctx.globalAlpha = alpha * t.flash * (w ? 0.5 : 0.9);
+        ctx.strokeStyle = 'rgba(18,24,40,.55)';
+        ctx.lineWidth = 4.2 * t.flash + 1.6;
+        ctx.beginPath();
+        ctx.ellipse(rx, ry + 1, hw * rr, hh * rr, 0, 0, 6.2832);
+        ctx.stroke();
+        ctx.strokeStyle = m.glow;
+        ctx.lineWidth = 2.4 * t.flash + 0.9;
+        ctx.beginPath();
+        ctx.ellipse(rx, ry, hw * rr, hh * rr, 0, 0, 6.2832);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -1043,61 +1070,77 @@ SK.Tiles = (function () {
       ctx.restore();
     },
 
-    /* 자갈: 모서리가 살아 있는 돌. 셋 이상의 톤을 섞어야 '돌무더기'가 된다 */
+    /* 자갈: 물에 닳아 **둥글고 맨들맨들한** 조약돌이 수북이 쌓여 있다.
+       각진 돌은 부서진 콘크리트로 보인다. 조약돌은 세 가지로 읽힌다 —
+       타원 실루엣 · 위쪽에 몰린 하이라이트 · 돌끼리 겹친 그림자. */
     gravel: function (ctx, t, m, cx, cy, hw, hh) {
       ctx.save();
 
-      // 돌 사이로 보이는 마른 흙
-      ctx.fillStyle = 'rgba(88,84,78,.55)';
-      diamond(ctx, cx, cy, 0.95, 0.95); ctx.fill();
-      for (var d = 0; d < 20; d++) {
-        var da = t.seed * 3.1 + d * 2.399, dr = Math.sqrt((d % 9) / 9) * 0.82;
-        ctx.fillStyle = 'rgba(150,148,142,.5)';
-        ctx.beginPath();
-        ctx.arc(cx + Math.cos(da) * hw * dr, cy + Math.sin(da) * hh * dr, 1.1, 0, 6.2832);
-        ctx.fill();
-      }
+      // 돌 사이로 비치는 젖은 바닥
+      ctx.fillStyle = 'rgba(74,78,84,.85)';
+      diamond(ctx, cx, cy, 0.97, 0.97); ctx.fill();
 
       var tone = [
-        ['#f2f4f8', '#b9bec8'],   // 밝은 돌
-        ['#cfd4dc', '#9399a4'],
-        ['#a7adb8', '#6f757f'],   // 어두운 돌
-        ['#e2e6ec', '#a8aeb8']
+        ['#f4f6f9', '#c3c9d2', '#9aa2ad'],   // 흰 조약돌
+        ['#e3d9cc', '#bfb2a2', '#948779'],   // 베이지
+        ['#c7ccd3', '#9ba3ad', '#757d87'],   // 회색
+        ['#b8b0a6', '#928a80', '#6d675f']    // 짙은 갈회색
       ];
-      for (var k = 0; k < 15; k++) {
-        var a = t.seed * 1.3 + k * 2.399;
-        var rad = Math.sqrt((k % 11) / 11) * 0.74;
-        var px = cx + Math.cos(a) * hw * rad, py = cy + Math.sin(a) * hh * rad;
-        var r = 3.8 + (k % 4) * 1.5;
-        var pair = tone[k % tone.length];
 
-        // 돌 밑 그림자 — 있어야 표면 '위에' 놓인 것으로 읽힌다
-        ctx.fillStyle = 'rgba(32,34,40,.42)';
-        ctx.beginPath(); ctx.ellipse(px + 1.6, py + r * 0.44, r * 1.02, r * 0.44, 0, 0, 6.2832); ctx.fill();
+      /* 아래쪽(뒤)에 깔린 돌부터 그려 위로 쌓아 올린다.
+         같은 크기로 늘어놓으면 '알 박힌 판'이 되므로 크기를 크게 흔든다. */
+      var stones = [];
+      for (var k = 0; k < 26; k++) {
+        var a = t.seed * 1.7 + k * 2.399;
+        var rad = Math.sqrt((k % 16) / 16) * 0.88;      // 가장자리까지 깔리게
+        stones.push({
+          x: cx + Math.cos(a) * hw * rad,
+          y: cy + Math.sin(a) * hh * rad,
+          r: 4.4 + ((k * 7) % 5) * 1.5,
+          rot: a * 0.7,
+          tone: tone[k % tone.length]
+        });
+      }
+      stones.sort(function (p1, p2) { return p1.y - p2.y; });
 
-        // 각진 몸통 — 빛 받는 면과 그늘진 면을 나눠 칠한다
-        var verts = [];
-        for (var v = 0; v < 5; v++) {
-          var va = a + v * 1.2566, vr = r * (0.74 + ((k + v) % 3) * 0.16);
-          verts.push([px + Math.cos(va) * vr, py + Math.sin(va) * vr * 0.62]);
-        }
-        var lg = ctx.createLinearGradient(px - r, py - r * 0.6, px + r, py + r * 0.6);
-        lg.addColorStop(0, pair[0]); lg.addColorStop(1, pair[1]);
-        ctx.fillStyle = lg;
-        ctx.beginPath();
-        for (var n = 0; n < verts.length; n++) {
-          if (n === 0) ctx.moveTo(verts[n][0], verts[n][1]); else ctx.lineTo(verts[n][0], verts[n][1]);
-        }
-        ctx.closePath(); ctx.fill();
+      for (var n = 0; n < stones.length; n++) {
+        var st = stones[n];
+        var rx = st.r, ry = st.r * 0.72;
 
-        // 모서리에 걸리는 빛 한 줄 — 각이 살아난다
-        ctx.strokeStyle = 'rgba(255,255,255,.65)'; ctx.lineWidth = 1;
+        // 돌 밑 그림자 — 겹쳐 쌓인 느낌은 이 그림자에서 나온다
+        ctx.fillStyle = 'rgba(28,30,34,.45)';
         ctx.beginPath();
-        ctx.moveTo(verts[0][0], verts[0][1]); ctx.lineTo(verts[1][0], verts[1][1]);
-        ctx.stroke();
-        ctx.strokeStyle = 'rgba(46,50,58,.5)'; ctx.lineWidth = 0.9;
+        ctx.ellipse(st.x + 1.4, st.y + ry * 0.45, rx * 1.02, ry * 0.75, st.rot, 0, 6.2832);
+        ctx.fill();
+
+        // 몸통 — 위가 밝고 아래로 갈수록 어두운 둥근 돌
+        var g = ctx.createRadialGradient(
+          st.x - rx * 0.34, st.y - ry * 0.55, rx * 0.12,
+          st.x, st.y, rx * 1.08);
+        g.addColorStop(0, st.tone[0]);
+        g.addColorStop(0.55, st.tone[1]);
+        g.addColorStop(1, st.tone[2]);
+        ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.moveTo(verts[2][0], verts[2][1]); ctx.lineTo(verts[3][0], verts[3][1]);
+        ctx.ellipse(st.x, st.y, rx, ry, st.rot, 0, 6.2832);
+        ctx.fill();
+
+        // 맨들맨들한 표면 — 위쪽에 맺히는 좁은 하이라이트 한 점
+        ctx.fillStyle = 'rgba(255,255,255,.75)';
+        ctx.beginPath();
+        ctx.ellipse(st.x - rx * 0.3, st.y - ry * 0.45, rx * 0.26, ry * 0.2, st.rot - 0.4, 0, 6.2832);
+        ctx.fill();
+
+        // 아래쪽에서 되비치는 빛 — 돌이 '젖어' 보인다
+        ctx.fillStyle = 'rgba(255,255,255,.18)';
+        ctx.beginPath();
+        ctx.ellipse(st.x + rx * 0.12, st.y + ry * 0.42, rx * 0.5, ry * 0.2, st.rot, 0, 6.2832);
+        ctx.fill();
+
+        // 가장자리를 아주 옅게만 — 선이 굵으면 다시 각져 보인다
+        ctx.strokeStyle = 'rgba(60,64,70,.28)'; ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.ellipse(st.x, st.y, rx, ry, st.rot, 0, 6.2832);
         ctx.stroke();
       }
       ctx.restore();
@@ -1378,19 +1421,32 @@ SK.Tiles = (function () {
     ctx.fillStyle = g;
     diamond(ctx, sx, sy, 0.94, 0.94); ctx.fill();
 
-    // 남은 조각들이 테두리에 삐죽 붙어 있다
-    ctx.fillStyle = m.side2;
-    for (var k = 0; k < 7; k++) {
-      var a = t.seed + k * 0.9;
-      var r0 = 0.72 + ((k * 5) % 3) * 0.1;
+    /* 남은 조각들이 테두리에 삐죽 붙어 있다.
+       전부 같은 어두운 색으로 그리면 '무엇이 부서진 자리'인지 알 수 없다.
+       윗면 색을 물려받게 해서 눈·모래·쿠키 자리가 서로 구분되게 한다. */
+    for (var k = 0; k < 9; k++) {
+      var a = t.seed + k * 0.72;
+      var r0 = 0.7 + ((k * 5) % 3) * 0.11;
       var x0 = sx + Math.cos(a) * hw * r0;
       var y0 = sy + Math.sin(a) * hh * r0;
+      ctx.fillStyle = (k % 3 === 0) ? m.top : (k % 3 === 1 ? m.topDark : m.side2);
       ctx.beginPath();
       ctx.moveTo(x0, y0);
       ctx.lineTo(x0 + Math.cos(a + 0.5) * 7, y0 + Math.sin(a + 0.5) * 4);
       ctx.lineTo(x0 + Math.cos(a) * 9, y0 + Math.sin(a) * 5 - 4);
       ctx.closePath(); ctx.fill();
     }
+
+    // 구멍 가장자리에 남은 재질 가루 — 방금 여기서 부서졌다는 흔적
+    ctx.globalAlpha = fade * 0.5;
+    ctx.fillStyle = m.glow;
+    for (var g2 = 0; g2 < 10; g2++) {
+      var ga = t.seed * 1.7 + g2 * 0.63, gr = 0.74 + (g2 % 3) * 0.08;
+      ctx.beginPath();
+      ctx.arc(sx + Math.cos(ga) * hw * gr, sy + Math.sin(ga) * hh * gr, 1.4 + (g2 % 2), 0, 6.2832);
+      ctx.fill();
+    }
+    ctx.globalAlpha = fade;
     ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 2;
     diamond(ctx, sx, sy, 0.94, 0.94); ctx.stroke();
     ctx.restore();
