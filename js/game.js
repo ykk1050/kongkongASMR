@@ -192,28 +192,41 @@ SK.Game = (function () {
    *
    *  대비책이 셋이다.
    *   1) Q·E·Z·C(넘패드 7·9·1·3) — **키 하나가 대각선 하나**
-   *   2) COMBINE_MS — 방금 눌렀던 방향 키는 떼었어도 잠깐 함께 눌린 것으로 친다.
-   *      `↑` 톡 → `←` 톡 처럼 **번갈아 눌러도** 대각선이 된다.
-   *   3) Player 의 AIM_HOLD — 방향을 떼고 점프해도 조준이 남아 있다.
-   *  셋을 합치면 한 번에 눌리는 키가 하나여도 대각선으로 뛸 수 있다.
+   *   2) TAP_HOLD_MS — 방금 톡 누른 방향 키가 그 축을 잠깐 맡아 준다.
+   *      `↑` 톡 → `←` 톡 처럼 **번갈아 눌러도** 대각선 조준이 된다.
+   *   3) Player 의 AIM_HOLD — 방향을 떼고 점프해도 조준이 잠깐 남아 있다.
+   *  셋 다 **조준**만 돕는다. 움직이려면 반드시 점프 키를 눌러야 한다.
    */
-  /* 톡톡 이어 누른 방향들을 **한 묶음**으로 본다.
+  /* 방향 입력을 **축마다 따로** 정한다 — 가로(x)와 세로(y).
    *
-   *  처음에는 "지금으로부터 260ms 안에 눌린 키"로 판정했는데, 사람이 ↓ 톡 → 톡 처럼
-   *  천천히 누르면 마지막 키를 누를 때쯤 첫 키가 이미 만료돼 대각선이 안 잡혔다.
-   *  기준이 틀렸던 것이다 — 중요한 건 '지금까지의 시간'이 아니라 **키와 키 사이의
-   *  간격**이다. 앞 키를 누른 뒤 COMBINE_MS 안에 다음 키가 오면 같은 묶음으로 잇고,
-   *  그보다 늦으면 새 묶음을 시작한다. 톡톡 리듬이 이어지는 한 계속 쌓인다.
+   *  ⚠ 예전에는 최근에 눌린 키들을 '묶음' 하나에 모아 벡터를 전부 더했다. 그런데
+   *  뗀 키가 묶음에 그대로 남아서, 방향키를 마구 누르면 ←와 →가 한 묶음에 같이
+   *  들어가 **서로 상쇄되어 조준이 0**이 됐다. 실제로 재현했다 —
+   *  →와 ↓만 누르고 있는데도 조준선이 사라지고, 그 상태로 점프하면 제자리
+   *  내려찍기가 된다. "마구 누르면 점선이 사라진다"와 "방향키 2개 + Space가
+   *  안 먹는다"가 같은 원인이었다.
    *
-   *  묶음은 마지막 입력 뒤 COMBO_HOLD_MS 동안 살아 있고(그동안 점프하면 그 방향으로
-   *  뛴다), 그 뒤엔 Player 의 AIM_HOLD 가 조금 더 끌고 가다 조준이 풀린다. */
-  var COMBINE_MS = 400;      // 같은 묶음으로 이어지는 키 사이 최대 간격
-  var COMBO_HOLD_MS = 350;   // 마지막 입력 뒤 묶음이 유지되는 시간
+   *  규칙을 뒤집었다.
+   *    · 그 축에 **지금 눌려 있는 키가 하나라도 있으면 그것만으로** 값을 정한다.
+   *      (←와 →를 실제로 같이 누르고 있으면 0이 맞다 — 그건 의도된 상쇄다)
+   *    · 눌린 키가 없는 축만 **가장 최근에 톡 눌린 키 하나**로 채운다.
+   *      축마다 하나만 기억하므로 반대 방향이 누적될 수 없다.
+   *
+   *  이러면 ↓ 톡 → 톡(순차 입력)도, ↓+→ 동시 누르기도 똑같이 대각선이 되고,
+   *  아무리 마구 눌러도 조준이 0에 갇히지 않는다. */
+  /*  수명은 축마다 따로 세지 않고 **마지막 방향 입력 하나**를 기준으로 함께 센다.
+   *  `↓` 톡 `→` 톡 처럼 이어 누를 때, 먼저 누른 ↓ 가 혼자 만료돼 버리면 마지막
+   *  순간에 대각선이 풀리기 때문이다. 이어지는 동안에는 함께 살아 있고, 손을
+   *  멈추면 함께 사라진다.
+   *
+   *  CHAIN_MS 보다 오래 쉬었다가 새로 누르면 **이전 조준을 버리고 새로 시작**한다.
+   *  그래야 한참 전에 눌렀던 ← 가 지금 누른 ↑ 에 멋대로 붙어 ↖ 가 되지 않는다. */
+  var TAP_HOLD_MS = 420;     // 마지막 방향 입력 뒤 톡 기억이 유지되는 시간
+  var CHAIN_MS = 450;        // 이 간격 안에 이어 누르면 같은 조준으로 합친다
 
-  /* ⚠ 이름 주의 — 이 파일에는 점수 배수용 `combo` 가 이미 있다(위쪽 var 선언).
-     같은 이름을 쓰면 정답을 맞힌 순간 `combo = 숫자` 가 이 객체를 덮어써서
-     방향 입력이 통째로 죽는다. 실제로 그렇게 망가뜨린 적이 있다. */
-  var dirCombo = { codes: Object.create(null), lastAt: -1e9 };
+  var tapX = { code: null };
+  var tapY = { code: null };
+  var lastDirAt = -1e9;      // 마지막 방향 키 입력 시각
   var KEYDIR = {
     ArrowUp: [0, -1], KeyW: [0, -1],
     ArrowDown: [0, 1], KeyS: [0, 1],
@@ -245,12 +258,17 @@ SK.Game = (function () {
       }
       if (!KEYDIR[e.code]) return;
       e.preventDefault();
-      if (!input.keys[e.code]) {                 // OS 자동 반복은 세지 않는다
+      /* e.repeat 으로 자동 반복을 거른다. input.keys 로 판별하면, keyup 이 유실돼
+         계속 '눌린 상태'로 남은 키는 다시 눌러도 새 입력으로 인정되지 않는다 —
+         키가 통째로 죽어 버린다. e.repeat 은 그 상황에서도 false 로 오므로
+         유실된 keyup 을 저절로 복구하는 효과가 있다. */
+      if (!e.repeat) {
         var tnow = performance.now();
-        // 앞 키와의 간격이 벌어졌으면 새 묶음을 시작한다
-        if (tnow - dirCombo.lastAt > COMBINE_MS) dirCombo.codes = Object.create(null);
-        dirCombo.codes[e.code] = true;
-        dirCombo.lastAt = tnow;
+        // 한참 쉬었다 누른 것이면 이전 조준은 버리고 새로 시작한다
+        if (tnow - lastDirAt > CHAIN_MS) { tapX.code = null; tapY.code = null; }
+        if (KEYDIR[e.code][0]) tapX.code = e.code;
+        if (KEYDIR[e.code][1]) tapY.code = e.code;
+        lastDirAt = tnow;
       }
       input.keys[e.code] = true;
       if (keyLog) logKey('down', e.code);
@@ -275,8 +293,8 @@ SK.Game = (function () {
     });
     window.addEventListener('blur', function () {
       input.keys = Object.create(null);
-      dirCombo.codes = Object.create(null);
-      dirCombo.lastAt = -1e9;
+      tapX.code = tapY.code = null;
+      lastDirAt = -1e9;
       input.jumpHeld = false;
       syncKeyDir();
     });
@@ -339,34 +357,41 @@ SK.Game = (function () {
         '</div>';
   }
 
-  /** 방향 묶음을 비운다 — 뛰고 나면 새로 잡아야 한다.
-      단, **지금 눌려 있는 키는 남긴다** — 누른 채로 연속 점프하는 중이기 때문이다. */
+  /** 톡 입력 기억을 비운다 — 뛰고 나면 새로 잡아야 한다.
+      누르고 있는 키는 어차피 '눌린 키' 쪽에서 읽으므로 따로 남길 필요가 없다. */
   function clearKeyCombine() {
-    var keep = Object.create(null), any = false;
-    for (var code in KEYDIR) if (input.keys[code]) { keep[code] = true; any = true; }
-    dirCombo.codes = keep;
-    dirCombo.lastAt = any ? performance.now() : -1e9;
+    tapX.code = tapY.code = null;
+    lastDirAt = -1e9;
   }
 
-  /** 눌려 있는 키 + 살아 있는 묶음의 벡터를 모두 더한다(축마다 -1..1) */
+  /**
+   * 한 축(0=가로, 1=세로)의 값을 정한다.
+   * 지금 눌려 있는 키가 있으면 그것만 쓰고, 없을 때만 최근에 톡 누른 키로 채운다.
+   */
+  function axisValue(idx, tap, tapAlive) {
+    var sum = 0, live = false;
+    for (var code in KEYDIR) {
+      var v = KEYDIR[code][idx];
+      if (!v || !input.keys[code]) continue;
+      sum += v; live = true;
+    }
+    if (live) return Math.max(-1, Math.min(1, sum));
+    if (tapAlive && tap.code) return KEYDIR[tap.code][idx];
+    return 0;
+  }
+
+  /** 축마다 따로 값을 정한다 — 반대 방향이 누적돼 조준이 0에 갇히지 않게 */
   function syncKeyDir() {
     if (padActive) return;                 // 조이스틱 입력이 우선
-    var x = 0, y = 0, tnow = performance.now();
-    // 누르고 있는 동안에는 묶음의 수명을 계속 갱신한다. 그래야 keyup 이 유실돼도
-    // (동시입력이 많을 때 키보드가 흘리는 일이 있다) 조준이 곧바로 무너지지 않고,
-    // 대각선을 잡은 채 점프 키를 누르는 그 짧은 순간이 지켜진다.
-    var holding = false;
-    for (var h in KEYDIR) if (input.keys[h]) { dirCombo.codes[h] = true; holding = true; }
-    if (holding) dirCombo.lastAt = tnow;
-
-    var alive = tnow - dirCombo.lastAt < COMBO_HOLD_MS;
-    for (var code in KEYDIR) {
-      if (!input.keys[code] && !(alive && dirCombo.codes[code])) continue;
-      x += KEYDIR[code][0];
-      y += KEYDIR[code][1];
-    }
-    input.dx = Math.max(-1, Math.min(1, x));
-    input.dy = Math.max(-1, Math.min(1, y));
+    var tnow = performance.now();
+    // 누르고 있는 키가 있으면 톡 기억의 수명을 계속 갱신한다 — 누른 채로 있는 동안
+    // 조준이 저절로 풀리지 않게, 그리고 keyup 이 유실돼도 곧바로 무너지지 않게
+    for (var h in KEYDIR) { if (input.keys[h]) { lastDirAt = tnow; break; } }
+    var tapAlive = tnow - lastDirAt < TAP_HOLD_MS;
+    var x = axisValue(0, tapX, tapAlive);
+    var y = axisValue(1, tapY, tapAlive);
+    input.dx = x;
+    input.dy = y;
   }
 
   /* =========================================================
@@ -654,7 +679,7 @@ SK.Game = (function () {
     }
 
     // 점프 입력은 '눌림 유지' 방식 — 조준을 먼저 잡고 눌러도, 누른 채 조준을 바꿔도 뛴다
-    // 조준 버퍼(COMBINE_MS)는 키 이벤트가 없어도 만료돼야 하므로 매 프레임 다시 센다
+    // 톡 입력(TAP_HOLD_MS)은 키 이벤트가 없어도 만료돼야 하므로 매 프레임 다시 센다
     syncKeyDir();
 
     // 이번 프레임에 플레이어가 '뛸 수 있는 상태'였는가 — 요청 소비 판단의 기준
@@ -1041,11 +1066,10 @@ SK.Game = (function () {
       },
       input: function () {
         var held = [], buf = [], tnow = performance.now();
-        var alive = tnow - dirCombo.lastAt < COMBO_HOLD_MS;
-        for (var c in KEYDIR) {
-          if (input.keys[c]) held.push(c);
-          if (alive && dirCombo.codes[c]) buf.push(c);
-        }
+        for (var c in KEYDIR) if (input.keys[c]) held.push(c);
+        var tapAlive = tnow - lastDirAt < TAP_HOLD_MS;
+        if (tapAlive && tapX.code) buf.push('x:' + tapX.code);
+        if (tapAlive && tapY.code) buf.push('y:' + tapY.code);
         var d = player && player.aimDir;
         return {
           dx: input.dx, dy: input.dy, jumpPending: jumpPending(),
