@@ -16,6 +16,7 @@ SK.Player = (function () {
   var HOP_H = 0.62;          // 보통 도약 높이(격자 z 단위)
   var HOP_POWER_H = 1.25;
   var COOLDOWN = 0.05;       // 착지 후 다음 도약까지
+  var AIM_HOLD = 0.35;       // 방향 키를 뗀 뒤 조준이 남아 있는 시간(초)
 
   /** 화면 8방향 → 격자 이웃 오프셋 */
   var DIRS = [
@@ -91,6 +92,7 @@ SK.Player = (function () {
       chain: 0,                // 연속 도약 수 (강도 보너스)
       chainTimer: 0,
       aimDir: null,            // 현재 조준 중인 방향(목표 타일 표시에 사용)
+      aimHold: 0,              // 방향 키를 뗀 뒤 조준이 남아 있는 시간
       facing: 1,
       squash: 0,
       stunTimer: 0,
@@ -125,8 +127,27 @@ SK.Player = (function () {
       if (p.chainTimer <= 0) p.chain = 0;
     }
 
-    // 조준 방향은 점프 여부와 상관없이 항상 갱신한다(목표 타일 표시용)
-    p.aimDir = quantize(input.dx, input.dy, p.aimDir);
+    /* 조준 방향은 점프 여부와 상관없이 항상 갱신한다(목표 타일 표시용).
+     *
+     *  방향 키를 떼도 AIM_HOLD 동안은 조준이 살아 있다. **세 키를 동시에 누르지
+     *  않아도 되게** 하려는 것이다 — 대각선 + 점프는 `↑`+`←`+`Space` 로 3키 동시
+     *  입력인데, 값싼 키보드는 이 조합에서 한 키를 통째로 삼킨다(방향키 묶음에서
+     *  특히 자주 일어난다). 조준이 잠깐 남아 있으면 **방향을 잡았다 떼고 점프**해도
+     *  되므로 한 번에 두 키면 충분해진다.
+     *
+     *  제자리 내려찍기(방향 없이 점프)와 헷갈리지 않는다 — 조준 표시가 켜져 있으면
+     *  그 칸으로 뛰고, 꺼져 있으면 내려찍기다. 화면에 보이는 그대로다.
+     */
+    var aim = quantize(input.dx, input.dy, p.aimDir);
+    if (aim) {
+      p.aimDir = aim;
+      p.aimHold = AIM_HOLD;
+    } else if (p.aimHold > 0) {
+      p.aimHold = Math.max(0, p.aimHold - dt);
+      if (p.aimHold === 0) p.aimDir = null;
+    } else {
+      p.aimDir = null;
+    }
 
     if (p.hopping) {
       advanceHop(p, dt, world, ev);
@@ -202,7 +223,7 @@ SK.Player = (function () {
     p.squash = -0.22 * Math.sin(Math.PI * t) * (p.power > 1 ? 1.3 : 1);
   }
 
-  function stun(p, sec) { p.stunTimer = sec; p.chain = 0; }
+  function stun(p, sec) { p.stunTimer = sec; p.chain = 0; p.aimHold = 0; p.aimDir = null; }
 
   /* ---------- 렌더 ---------- */
 
