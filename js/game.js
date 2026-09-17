@@ -877,9 +877,13 @@ SK.Game = (function () {
 
     visit(t);
 
-    // 부서진 타일은 되살아나지 않는다. 글자는 성한 칸으로 옮겨 준다.
-    // 이미 밟은 글자도 옮겨야 한다 — 틀리면 진행이 처음으로 돌아가 다시 밟아야 하므로.
-    if (res.sound === 'shatter' && t.role === 'seq') relocateLabel(t);
+    if (res.sound === 'shatter') {
+      // 부서진 타일은 되살아나지 않는다. 글자는 성한 칸으로 옮겨 준다.
+      // 이미 밟은 글자도 옮겨야 한다 — 틀리면 진행이 처음으로 돌아가 다시 밟아야 하므로.
+      if (t.role === 'seq') relocateLabel(t);
+      // 발밑이 무너졌으니 그대로 빠진다 — 구멍에 뛰어든 것과 같은 감점
+      fallIntoHole(i, j);
+    }
   }
 
   /**
@@ -992,8 +996,8 @@ SK.Game = (function () {
   var FALL_PENALTY = 15;
 
   function fallIntoHole(i, j) {
-    phase = 'wrong';
-    phaseTimer = 1.0;
+    // 마지막 글자를 밟은 순간 발판이 무너질 수도 있다 — 그때는 완성 연출을 지키게 둔다
+    if (phase === 'play') { phase = 'wrong'; phaseTimer = 1.0; }
     streak = 0; combo = 0;
     score = Math.max(0, score - FALL_PENALTY);
 

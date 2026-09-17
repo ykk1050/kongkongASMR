@@ -1128,9 +1128,8 @@ SK.Tiles = (function () {
   function drawHole(ctx, t, m, sx, sy, hw, hh, alpha) {
     var fade = Math.min(1, (t.broken - 0.55) / 0.45);
 
-    /* 에어캡은 **깨지지 않는다**. 알이 전부 터졌을 뿐이라 시트는 그대로 남는다.
-       여기서 어두운 구멍과 삐죽한 파편을 그리면 비닐이 유리처럼 보인다. */
-    if (t.mat === 'bubble') { drawPoppedSheet(ctx, t, m, sx, sy, hw, hh, fade); return; }
+    /* 예전에는 에어캡만 시트를 남겼다. 지금은 부서진 타일이 되살아나지 않으므로,
+       시트가 남아 있으면 '밟을 수 있어 보이는데 못 밟는 자리'가 된다. 전부 구멍으로 통일한다. */
 
     ctx.save();
     ctx.globalAlpha = fade;
@@ -1188,44 +1187,6 @@ SK.Tiles = (function () {
       ctx.ellipse(mx, my, 12, 6.5, 0, 0, 6.2832);
       ctx.fill();
     }
-    ctx.restore();
-  }
-
-  /** 알이 전부 터진 에어캡 — 납작하게 주저앉은 비닐 시트와 주름만 남는다 */
-  function drawPoppedSheet(ctx, t, m, sx, sy, hw, hh, fade) {
-    ctx.save();
-    ctx.globalAlpha = 1;
-
-    // 바람 빠진 시트 — 가운데가 살짝 꺼지고 가장자리가 들린다
-    var g = ctx.createRadialGradient(sx, sy, 2, sx, sy, hw);
-    g.addColorStop(0, 'rgba(150,196,224,.95)');
-    g.addColorStop(0.7, 'rgba(196,228,246,.95)');
-    g.addColorStop(1, 'rgba(226,244,255,.95)');
-    ctx.fillStyle = g;
-    diamond(ctx, sx, sy, 0.92, 0.92); ctx.fill();
-    ctx.strokeStyle = 'rgba(96,152,186,.75)'; ctx.lineWidth = 1.6;
-    diamond(ctx, sx, sy, 0.92, 0.92); ctx.stroke();
-
-    // 터진 알 자국 — 알이 있던 자리마다 쭈글쭈글한 주름
-    ctx.strokeStyle = 'rgba(48,104,138,.8)';
-    ctx.lineWidth = 1.5;
-    for (var k = 0; k < BUBBLE_CELLS.length; k++) {
-      var c = BUBBLE_CELLS[k];
-      var bx = sx + (c[0] - c[1]) * hw * 0.3;
-      var by = sy + (c[0] + c[1]) * hh * 0.3;
-      ctx.beginPath(); ctx.ellipse(bx, by, 9, 4.4, 0, 0, 6.2832); ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(bx - 6, by - 1.2); ctx.lineTo(bx + 2, by + 1.8);
-      ctx.lineTo(bx + 6, by - 1.6);
-      ctx.stroke();
-    }
-
-    // 비닐다운 미끈한 반사 한 줄
-    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(sx - hw * 0.5, sy - hh * 0.12);
-    ctx.quadraticCurveTo(sx, sy - hh * 0.4, sx + hw * 0.45, sy - hh * 0.05);
-    ctx.stroke();
     ctx.restore();
   }
 
