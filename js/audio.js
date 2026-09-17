@@ -661,16 +661,34 @@ SK.Audio = (function () {
       toneVoice({ dest: d, t: t, freq: 148 * r, freqEnd: 92 * r, type: 'sine', gain: g * 0.3, dur: 0.06, lp: 320 });
     },
 
-    /* 스티로폼 — 알갱이가 비벼지는 높고 마른 끼익.
-       고역만 쌓으면 거의 들리지 않는다. 발밑에서 눌리는 둔한 몸통이 함께 있어야 한다 */
-    foam: function (d, D, i, r, t) {
-      var g = 0.253 + 0.321 * i;
-      squeak({ dest: d, t: t + 0.008, base: 1100 * r, rise: 0.9, gain: g * 0.9, count: 8, span: 0.15, q: 6 });
-      noiseVoice({ dest: d, t: t, filter: 'highpass', freq: 2600 * r, gain: g * 0.4, dur: 0.1, attack: 0.008 });
-      noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 520 * r, q: 0.6, gain: g * 0.55, dur: 0.12, attack: 0.012 });
+    /* 양철판 — 탱. 두드린 함석은 **비조화 모드**가 길게 남는다.
+       배음을 정수비로 쌓으면 종이 되고, 감쇠를 짧게 하면 깡통이 아니라 나무가 된다 */
+    metal: function (d, D, i, r, t) {
+      var g = 0.058 + 0.076 * i;
+
+      // 1) 때리는 순간의 쇳소리 — 아주 짧고 밝게
+      noiseVoice({ dest: d, t: t, filter: 'highpass', freq: 5200, gain: g * 0.7, dur: 0.005, attack: 0.0004 });
+      noiseVoice({ dest: d, t: t + 0.001, filter: 'bandpass', freq: 3200 * r, q: 2.0, gain: g * 0.5, dur: 0.02 });
+
+      // 2) 판이 우는 소리 — 비조화비 + 긴 감쇠가 '금속'의 정체
       modalVoice({
-        dest: d, t: t, base: 112 * r, gain: g * 0.5, jitter: 0.03,
-        modes: [{ f: 1.00, d: 0.09, g: 1.0, a: 0.006 }, { f: 2.2, d: 0.05, g: 0.25 }]
+        dest: d, t: t, base: 262 * r, gain: g, jitter: 0.015,
+        modes: [
+          { f: 1.00, d: 0.58, g: 1.00 },
+          { f: 1.72, d: 0.44, g: 0.62 },
+          { f: 2.41, d: 0.33, g: 0.40 },
+          { f: 3.86, d: 0.21, g: 0.22 },
+          { f: 5.31, d: 0.13, g: 0.10 }
+        ]
+      });
+
+      // 3) 얇은 판이 출렁이며 내는 낮은 울렁임
+      toneVoice({ dest: d, t: t, freq: 128 * r, freqEnd: 96 * r, type: 'sine', gain: g * 0.35, dur: 0.18, lp: 300 });
+
+      // 4) 사방으로 번지는 잔향감 — 좌우로 살짝 흩어 준다
+      granular({
+        dests: D, t: t + 0.02, count: 6, span: 0.2,
+        freq: [2600 * r, 7000 * r], q: 6, gain: g * 0.12, grain: [0.006, 0.02], decay: 1.1
       });
     },
 

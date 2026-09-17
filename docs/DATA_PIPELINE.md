@@ -117,7 +117,7 @@
 | `sponge` | 스펀지 | **뽀드득** | 탄성 | — |
 | `water` | 물웅덩이 | **찰방** | 탄성 | — |
 | `gravel` | 자갈 | **자그락** | 탄성 | — |
-| `foam` | 스티로폼 | **끼익** | 탄성 | — |
+| `metal` | 양철판 | **탱** | 탄성 | — |
 | `leaf` | 낙엽 | **바스락** | 소모성 | 4번째 · **복구 없음** |
 | `bubble` | 에어캡 | **뽁** | 소모성 | 4번째 · **복구 없음** |
 | `orbeez` | 구슬볼 | **톡톡** | 소모성 | 4번째 · **복구 없음** |
@@ -225,7 +225,7 @@ SK.Quiz.load('data/quizzes.json')
 
 | `material` | 분류 | 완전 파괴까지 | 복구 |
 |---|---|:---:|:---:|
-| `keycap` `cotton` `jelly` `wood` `water` `gravel` `foam` … | 탄성 | 부서지지 않음 | — |
+| `keycap` `cotton` `jelly` `wood` `water` `gravel` `metal` … | 탄성 | 부서지지 않음 | — |
 | `leaf` `bubble` `orbeez` `sand` `snow` `paper` `ice` `cookie` | 소모성 | 4번째 | **없음** |
 
 큰 점프(`Space`)도 한 번에 한 단계만 깎습니다.

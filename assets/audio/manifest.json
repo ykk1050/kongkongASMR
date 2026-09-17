@@ -73,6 +73,38 @@
         "snow_5.wav"
       ],
       "gain": 0.839
+    },
+    "step_water": {
+      "files": [
+        "water_1.wav",
+        "water_2.wav",
+        "water_3.wav"
+      ],
+      "gain": 0.97
+    },
+    "step_gravel": {
+      "files": [
+        "gravel_1.wav",
+        "gravel_2.wav"
+      ],
+      "gain": 3.94
+    },
+    "step_cookie": {
+      "files": [
+        "cookie_1.wav",
+        "cookie_2.wav",
+        "cookie_3.wav"
+      ],
+      "gain": 3.03
+    },
+    "step_paper": {
+      "files": [
+        "paper_1.wav",
+        "paper_2.wav",
+        "paper_3.wav",
+        "paper_4.wav"
+      ],
+      "gain": 1.37
     }
   }
 }

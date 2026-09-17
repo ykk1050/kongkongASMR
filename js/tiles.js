@@ -108,10 +108,10 @@ SK.Tiles = (function () {
       top: '#e0a76a', topDark: '#b87940', side: '#9a6231', side2: '#7c4e26',
       ink: '#3b2008', glow: '#ffd39a', thick: 0.72, squish: 0.3, art: 'cookie'
     },
-    foam: {
-      label: '스티로폼', sound: '끼익', klass: 'elastic', durability: 0,
-      top: '#fbfbf2', topDark: '#dcdcc9', side: '#c3c3b0', side2: '#a1a18f',
-      ink: '#3c3c2a', glow: '#ffffff', thick: 1.0, squish: 0.55, art: 'foam'
+    metal: {
+      label: '양철판', sound: '탱', klass: 'elastic', durability: 0,
+      top: '#cfd8e0', topDark: '#94a3af', side: '#7c8b98', side2: '#5f6c78',
+      ink: '#1d2830', glow: '#eaf4ff', thick: 0.62, squish: 0.12, art: 'metal'
     },
     paper: {
       label: '종이', sound: '구깃', klass: 'consumable', durability: 4,
@@ -1174,33 +1174,57 @@ SK.Tiles = (function () {
       ctx.restore();
     },
 
-    /* 스티로폼: 눌러 붙은 알갱이. 알갱이 사이 틈이 보여야 '뽀드득'이 예상된다 */
-    foam: function (ctx, t, m, cx, cy, hw, hh) {
+    /* 양철판: 골이 진 함석 + 못머리.
+       금속은 '회색'이 아니라 **반사**다. 밝은 띠와 어두운 띠를 붙여 놓아야 쇠로 보인다 */
+    metal: function (ctx, t, m, cx, cy, hw, hh) {
       ctx.save();
 
-      // 알갱이 사이의 그늘 — 먼저 깔아야 알갱이가 '붙어 있는' 것으로 보인다
-      ctx.fillStyle = 'rgba(176,176,158,.55)';
-      diamond(ctx, cx, cy, 0.94, 0.94); ctx.fill();
+      // 판 전체에 흐르는 반사 — 위쪽은 하늘, 아래쪽은 바닥을 비춘다
+      var g = ctx.createLinearGradient(cx, cy - hh, cx, cy + hh);
+      g.addColorStop(0, 'rgba(238,247,255,.85)');
+      g.addColorStop(0.45, 'rgba(150,166,180,.5)');
+      g.addColorStop(0.62, 'rgba(206,222,236,.7)');
+      g.addColorStop(1, 'rgba(112,128,142,.6)');
+      ctx.fillStyle = g;
+      diamond(ctx, cx, cy, 0.96, 0.96); ctx.fill();
 
-      for (var k = 0; k < 34; k++) {
-        var a = t.seed * 1.1 + k * 2.399;
-        var rad = Math.sqrt((k % 13) / 13) * 0.8;
-        var px = cx + Math.cos(a) * hw * rad, py = cy + Math.sin(a) * hh * rad;
-        var r = 3.4 + (k % 3) * 1.3;
+      // 골 — 밝은 선과 어두운 선을 나란히 그어야 주름이 선다.
+      // 판 밖으로 나가면 철사처럼 보이므로 윗면 안쪽으로 잘라 낸다
+      ctx.save();
+      diamond(ctx, cx, cy, 0.96, 0.96); ctx.clip();
+      ctx.lineCap = 'butt';
+      for (var k = -3; k <= 3; k++) {
+        var off = k * 0.22;
+        var x0 = cx + off * hw - hw, y0 = cy + off * hh + hh;
+        var x1 = cx + off * hw + hw, y1 = cy + off * hh - hh;
+        ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.moveTo(x0, y0 - 1.4); ctx.lineTo(x1, y1 - 1.4); ctx.stroke();
+        ctx.strokeStyle = 'rgba(70,84,96,.45)'; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(x0, y0 + 1); ctx.lineTo(x1, y1 + 1); ctx.stroke();
+      }
+      ctx.restore();
 
-        ctx.fillStyle = 'rgba(150,150,130,.35)';
-        ctx.beginPath(); ctx.arc(px + 0.8, py + r * 0.3, r, 0, 6.2832); ctx.fill();
+      // 네 귀퉁이의 못머리 — 판이 '고정돼 있다'는 신호
+      var nails = [[-0.52, 0], [0.52, 0], [0, -0.52], [0, 0.52]];
+      for (var n = 0; n < nails.length; n++) {
+        var nx = cx + nails[n][0] * hw, ny = cy + nails[n][1] * hh;
+        ctx.fillStyle = 'rgba(58,70,80,.55)';
+        ctx.beginPath(); ctx.ellipse(nx + 0.8, ny + 1.2, 3.2, 2.2, 0, 0, 6.2832); ctx.fill();
+        var ng = ctx.createRadialGradient(nx - 1, ny - 1.2, 0.3, nx, ny, 3.2);
+        ng.addColorStop(0, '#f4f9ff');
+        ng.addColorStop(1, '#8b9aa6');
+        ctx.fillStyle = ng;
+        ctx.beginPath(); ctx.ellipse(nx, ny, 3, 2, 0, 0, 6.2832); ctx.fill();
+      }
 
-        var bg = ctx.createRadialGradient(px - r * 0.35, py - r * 0.4, 0.4, px, py, r);
-        bg.addColorStop(0, 'rgba(255,255,255,1)');
-        bg.addColorStop(0.7, 'rgba(248,248,240,1)');
-        bg.addColorStop(1, 'rgba(218,218,204,1)');
-        ctx.fillStyle = bg;
-        ctx.beginPath(); ctx.arc(px, py, r, 0, 6.2832); ctx.fill();
-
-        // 알갱이 꼭대기의 점 하이라이트
-        ctx.fillStyle = 'rgba(255,255,255,.9)';
-        ctx.beginPath(); ctx.arc(px - r * 0.3, py - r * 0.35, r * 0.28, 0, 6.2832); ctx.fill();
+      // 긁힌 자국 몇 줄 — 쓰던 판이라는 표시
+      ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 0.9;
+      for (var s2 = 0; s2 < 4; s2++) {
+        var a2 = t.seed * 1.7 + s2 * 1.9, rr = 0.2 + (s2 % 3) * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a2) * hw * rr, cy + Math.sin(a2) * hh * rr);
+        ctx.lineTo(cx + Math.cos(a2 + 0.6) * hw * (rr + 0.18), cy + Math.sin(a2 + 0.6) * hh * (rr + 0.18));
+        ctx.stroke();
       }
       ctx.restore();
     },
@@ -1232,7 +1256,7 @@ SK.Tiles = (function () {
       diamond(ctx, cx, cy, 0.8, 0.8); ctx.stroke();
 
       // 구김 — 접힌 선은 꺾인 V 다. 한쪽 면은 빛을 받고 다른 면은 그늘진다
-      var folds = 2 + t.damage;
+      var folds = 1 + Math.min(2, t.damage);
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       for (var k = 0; k < folds; k++) {
         var a = t.seed + k * 1.9;
@@ -1292,13 +1316,16 @@ SK.Tiles = (function () {
       var lines = 2 + t.damage;
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       for (var k = 0; k < lines; k++) {
-        var a = t.seed * 0.7 + k * 1.7;
-        var pts = [[cx + Math.cos(a) * hw * 0.8, cy + Math.sin(a) * hh * 0.8]];
+        // 가장자리에서 출발해 안쪽으로 꺾여 들어간다 — 한 점에서 만나면 새 발자국이 된다
+        var a = t.seed * 1.9 + k * 2.3;
+        var pts = [[cx + Math.cos(a) * hw * 0.82, cy + Math.sin(a) * hh * 0.82]];
+        var ang = a + Math.PI + (((k * 5) % 3) - 1) * 0.35;
+        var rr = 0.82;
         for (var seg = 1; seg <= 3; seg++) {
-          var sa = a + Math.PI + (((k + seg) % 3) - 1) * 0.5;
-          var sr = 0.8 - seg * 0.27;
-          pts.push([cx + Math.cos(sa) * hw * sr * (seg % 2 ? -1 : 1),
-                    cy + Math.sin(sa) * hh * sr * (seg % 2 ? -1 : 1)]);
+          rr -= 0.22;
+          ang += (((k + seg * 3) % 3) - 1) * 0.55;
+          pts.push([cx + Math.cos(a) * hw * rr + Math.cos(ang) * hw * 0.12,
+                    cy + Math.sin(a) * hh * rr + Math.sin(ang) * hh * 0.12]);
         }
         for (var pass = 0; pass < 2; pass++) {
           ctx.strokeStyle = pass ? 'rgba(255,255,255,.95)' : 'rgba(44,112,150,.55)';

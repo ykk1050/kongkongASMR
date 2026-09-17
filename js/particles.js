@@ -38,7 +38,7 @@ SK.Particles = (function () {
     water: { hue: 196, light: 84, ring: 'rgba(191,239,255,', word: '찰방', fx: 'splash' },
     gravel: { hue: 220, light: 74, ring: 'rgba(216,220,228,', word: '자그락', fx: 'pebbles' },
     cookie: { hue: 30, light: 70, ring: 'rgba(255,211,154,', word: '바삭', fx: 'crumbs' },
-    foam: { hue: 60, light: 94, ring: 'rgba(255,255,244,', word: '끼익', fx: 'creak' },
+    metal: { hue: 205, light: 86, ring: 'rgba(224,240,255,', word: '탱', fx: 'clang' },
     paper: { hue: 44, light: 88, ring: 'rgba(255,244,210,', word: '구깃', fx: 'crinkle' },
     ice: { hue: 194, light: 90, ring: 'rgba(234,252,255,', word: '쩌억', fx: 'fracture' }
   };
@@ -319,26 +319,26 @@ SK.Particles = (function () {
       IMPACT.puff(gx, gy, P, i * 0.7, power, s);
     },
 
-    /* 스티로폼 '끼익' — 마른 마찰. 흰 알갱이가 부스러지고,
-       삐걱대는 소리를 지그재그 선 두 줄로 보여 준다 */
-    creak: function (gx, gy, P, i, power, s) {
-      var n = 12 + Math.round(i * 12);
-      for (var k = 0; k < n; k++) {
-        var a = Math.random() * 6.2832, sp = rnd(0.006, 0.026) * s;
-        push({
-          type: 'dot', gx: gx, gy: gy, gz: 0.03,
-          vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, vz: rnd(0.01, 0.04),
-          gravity: -0.16, life: rnd(0.3, 0.6), size: rnd(1.6, 3.4),
-          color: 'hsla(56,35%,99%,', alpha: 0.95
+    /* 양철판 '탱' — 판이 울린다. 링이 **연달아 세 겹** 퍼지는 것이 쇳소리의 잔향이고,
+       때린 자리에서 밝은 섬광이 짧게 튄다 */
+    clang: function (gx, gy, P, i, power, s) {
+      for (var c = 0; c < 3; c++) {
+        ring(gx, gy, {
+          size: 90 + c * 70, life: 0.3 + c * 0.18, width: 3.4 - c * 0.9,
+          gz: 0.01 + c * 0.02, color: c === 1 ? 'rgba(255,255,255,' : P.ring
         });
       }
-      for (var z = 0; z < 2; z++) {
-        var za = rnd(0, 6.2832);
+      push({
+        type: 'gleam', gx: gx, gy: gy, gz: 0.18,
+        life: 0.26, size: 26 + i * 20, rot: 0.9, color: 'rgba(255,255,255,'
+      });
+      for (var k = 0; k < 5; k++) {
+        var a = Math.random() * 6.2832;
         push({
-          type: 'streak', gx: gx, gy: gy, gz: 0.1 + z * 0.06,
-          vx: Math.cos(za) * 0.004, vy: Math.sin(za) * 0.004, vz: 0.03,
-          gravity: -0.02, life: 0.3, size: 14, rot: za, spin: 26,
-          color: 'hsla(50,30%,100%,'
+          type: 'streak', gx: gx, gy: gy, gz: 0.05,
+          vx: Math.cos(a) * 0.026 * s, vy: Math.sin(a) * 0.016 * s, vz: rnd(0.005, 0.02),
+          gravity: -0.05, life: rnd(0.18, 0.32), size: rnd(9, 16), rot: a,
+          color: 'hsla(200,90%,96%,'
         });
       }
     },
