@@ -191,7 +191,25 @@ SK.Game = (function () {
     Numpad8: [0, -1], Numpad2: [0, 1], Numpad4: [-1, 0], Numpad6: [1, 0],
     Numpad7: [-1, -1], Numpad9: [1, -1], Numpad1: [-1, 1], Numpad3: [1, 1]
   };
-  var JUMPKEY = { Space: 1, Enter: 1, NumpadEnter: 1, Numpad5: 1, NumpadAdd: 1 };
+  /* 점프 키를 키보드 곳곳에 깔아 둔다.
+     Space 가 삼켜지는 키보드라도 매트릭스 행이 다른 키 하나는 살아남는다. */
+  var JUMPKEY = {
+    Space: 1, Enter: 1, NumpadEnter: 1, Numpad0: 1, Numpad5: 1, NumpadAdd: 1,
+    ShiftRight: 1, ControlRight: 1, Period: 1, Slash: 1,
+    KeyJ: 1, KeyK: 1, KeyF: 1
+  };
+
+  /* 같은 방향 키를 톡톡 두 번 = 점프.
+   *
+   *  ⚠ 이것이 방향키로 대각선을 뛰는 **확실한 길**이다.
+   *  `↑`+`←` 를 누른 채 `Space` 를 누르면 세 키 동시입력이라, 값싼 키보드는 세 번째
+   *  키(보통 Space)를 통째로 삼킨다. 브라우저에 아예 도착하지 않으므로 JS로는
+   *  손쓸 방법이 없다. 그래서 **점프에 별도 키를 안 쓰는 길**을 하나 열어 둔다 —
+   *  `↑` 톡, `←` 톡, `←` 톡. 한 번에 눌리는 키가 늘 하나뿐이라 어떤 키보드에서도 된다.
+   *  (조준은 COMBINE_MS 동안 합쳐지므로 마지막 톡톡이 대각선 점프가 된다.)
+   */
+  var TAP_JUMP_MS = 330;
+  var lastTap = { code: null, at: 0 };
 
   function bindKeys() {
     window.addEventListener('keydown', function (e) {
@@ -204,7 +222,16 @@ SK.Game = (function () {
       }
       if (!KEYDIR[e.code]) return;
       e.preventDefault();
-      if (!input.keys[e.code]) input.pressed[e.code] = performance.now();
+      if (!input.keys[e.code]) {                 // OS 자동 반복은 세지 않는다
+        var tnow = performance.now();
+        input.pressed[e.code] = tnow;
+        if (lastTap.code === e.code && tnow - lastTap.at < TAP_JUMP_MS) {
+          input.jump = true;                     // 톡톡 → 점프
+          lastTap.code = null;                   // 3연타가 연속 점프로 번지지 않게
+        } else {
+          lastTap.code = e.code; lastTap.at = tnow;
+        }
+      }
       input.keys[e.code] = true;
       if (keyLog) logKey('down', e.code);
       syncKeyDir();
@@ -227,6 +254,7 @@ SK.Game = (function () {
       input.keys = Object.create(null);
       input.pressed = Object.create(null);
       input.jumpHeld = false;
+      lastTap.code = null;
       syncKeyDir();
     });
   }
