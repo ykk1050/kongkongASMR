@@ -41,8 +41,28 @@ SK.Game = (function () {
   var phaseTimer = 0;
   var ui = {};
 
-  var input = { dx: 0, dy: 0, jump: false, jumpHeld: false,
-                keys: Object.create(null), pressed: Object.create(null) };
+  var input = { dx: 0, dy: 0, jumpAt: -1e9, jumpHeld: false,
+                keys: Object.create(null) };
+
+  /* 점프 입력 버퍼.
+   *
+   *  ⚠ 예전에는 도약 중에 누른 점프가 **통째로 버려졌다**. 도약은 0.30초(큰 점프
+   *  0.44초)이고 착지 후 쿨다운이 0.05초라, 연달아 움직이는 동안에는 상당 시간이
+   *  '못 뛰는 구간'이다. 그 구간에 누른 Space 는 그냥 사라졌다 — 플레이어에게는
+   *  "가끔 스페이스가 안 먹는다"로 보인다. 실제로 그랬다.
+   *
+   *  버퍼를 밀리초로 재는 것은 틀린 접근이었다. '못 뛰는 구간'의 길이가 도약 종류와
+   *  쿨다운에 따라 달라서, 고정 시간으로는 구간 초반의 입력을 늘 놓친다.
+   *
+   *  그래서 시간이 아니라 **기회**로 센다 — 요청은 플레이어가 실제로 뛸 수 있게 되는
+   *  프레임까지 살아 있고, 그 프레임에 소비된다(뛰었든, 갈 수 없는 방향이라 튕겼든).
+   *  못 뛰는 동안에는 아무리 오래여도 유지되므로 입력이 사라지지 않는다.
+   *  (조이스틱 '쿵' 버튼에도 똑같이 걸린다.) */
+  var JUMP_STALE_MS = 900;          // 탭이 멈춰 있었을 때를 대비한 안전장치
+
+  function requestJump() { input.jumpAt = performance.now(); }
+  function consumeJump() { input.jumpAt = -1e9; }
+  function jumpPending() { return performance.now() - input.jumpAt < JUMP_STALE_MS; }
 
   /* =========================================================
    *  좌표 변환 — 타일 간격을 반영한 격자 → 화면
@@ -177,9 +197,20 @@ SK.Game = (function () {
    *   3) Player 의 AIM_HOLD — 방향을 떼고 점프해도 조준이 남아 있다.
    *  셋을 합치면 한 번에 눌리는 키가 하나여도 대각선으로 뛸 수 있다.
    */
-  /* 방금 눌린 방향 키를 '아직 눌려 있는 것'으로 쳐 주는 시간(ms).
-     길면 따로 누른 두 방향이 멋대로 합쳐지고, 짧으면 번갈아 누르기가 안 먹는다. */
-  var COMBINE_MS = 260;
+  /* 톡톡 이어 누른 방향들을 **한 묶음**으로 본다.
+   *
+   *  처음에는 "지금으로부터 260ms 안에 눌린 키"로 판정했는데, 사람이 ↓ 톡 → 톡 처럼
+   *  천천히 누르면 마지막 키를 누를 때쯤 첫 키가 이미 만료돼 대각선이 안 잡혔다.
+   *  기준이 틀렸던 것이다 — 중요한 건 '지금까지의 시간'이 아니라 **키와 키 사이의
+   *  간격**이다. 앞 키를 누른 뒤 COMBINE_MS 안에 다음 키가 오면 같은 묶음으로 잇고,
+   *  그보다 늦으면 새 묶음을 시작한다. 톡톡 리듬이 이어지는 한 계속 쌓인다.
+   *
+   *  묶음은 마지막 입력 뒤 COMBO_HOLD_MS 동안 살아 있고(그동안 점프하면 그 방향으로
+   *  뛴다), 그 뒤엔 Player 의 AIM_HOLD 가 조금 더 끌고 가다 조준이 풀린다. */
+  var COMBINE_MS = 400;      // 같은 묶음으로 이어지는 키 사이 최대 간격
+  var COMBO_HOLD_MS = 350;   // 마지막 입력 뒤 묶음이 유지되는 시간
+
+  var combo = { codes: Object.create(null), lastAt: -1e9 };
   var KEYDIR = {
     ArrowUp: [0, -1], KeyW: [0, -1],
     ArrowDown: [0, 1], KeyS: [0, 1],
@@ -215,7 +246,7 @@ SK.Game = (function () {
     window.addEventListener('keydown', function (e) {
       if (JUMPKEY[e.code]) {
         e.preventDefault();
-        if (!input.keys[e.code]) input.jump = true;
+        if (!input.keys[e.code]) requestJump();
         input.keys[e.code] = true;
         input.jumpHeld = true;
         return;
@@ -224,9 +255,12 @@ SK.Game = (function () {
       e.preventDefault();
       if (!input.keys[e.code]) {                 // OS 자동 반복은 세지 않는다
         var tnow = performance.now();
-        input.pressed[e.code] = tnow;
+        // 앞 키와의 간격이 벌어졌으면 새 묶음을 시작한다
+        if (tnow - combo.lastAt > COMBINE_MS) combo.codes = Object.create(null);
+        combo.codes[e.code] = true;
+        combo.lastAt = tnow;
         if (lastTap.code === e.code && tnow - lastTap.at < TAP_JUMP_MS) {
-          input.jump = true;                     // 톡톡 → 점프
+          requestJump();                         // 톡톡 → 점프
           lastTap.code = null;                   // 3연타가 연속 점프로 번지지 않게
         } else {
           lastTap.code = e.code; lastTap.at = tnow;
@@ -252,7 +286,8 @@ SK.Game = (function () {
     });
     window.addEventListener('blur', function () {
       input.keys = Object.create(null);
-      input.pressed = Object.create(null);
+      combo.codes = Object.create(null);
+      combo.lastAt = -1e9;
       input.jumpHeld = false;
       lastTap.code = null;
       syncKeyDir();
@@ -274,17 +309,29 @@ SK.Game = (function () {
     console.log('[key] ' + kind + ' ' + code + '   held=[' + held.join(' ') + ']');
   }
 
-  /** 대각선 확정에 쓰는 '조준 버퍼'를 비운다 — 점프한 뒤에는 새로 잡아야 한다 */
-  function clearKeyCombine() { input.pressed = Object.create(null); }
+  /** 방향 묶음을 비운다 — 뛰고 나면 새로 잡아야 한다.
+      단, **지금 눌려 있는 키는 남긴다** — 누른 채로 연속 점프하는 중이기 때문이다. */
+  function clearKeyCombine() {
+    var keep = Object.create(null), any = false;
+    for (var code in KEYDIR) if (input.keys[code]) { keep[code] = true; any = true; }
+    combo.codes = keep;
+    combo.lastAt = any ? performance.now() : -1e9;
+  }
 
-  /** 눌려 있는(또는 방금 눌렸던) 방향 키의 벡터를 모두 더한다(축마다 -1..1로 묶어서) */
+  /** 눌려 있는 키 + 살아 있는 묶음의 벡터를 모두 더한다(축마다 -1..1) */
   function syncKeyDir() {
     if (padActive) return;                 // 조이스틱 입력이 우선
     var x = 0, y = 0, tnow = performance.now();
+    // 누르고 있는 동안에는 묶음의 수명을 계속 갱신한다. 그래야 keyup 이 유실돼도
+    // (동시입력이 많을 때 키보드가 흘리는 일이 있다) 조준이 곧바로 무너지지 않고,
+    // 대각선을 잡은 채 점프 키를 누르는 그 짧은 순간이 지켜진다.
+    var holding = false;
+    for (var h in KEYDIR) if (input.keys[h]) { combo.codes[h] = true; holding = true; }
+    if (holding) combo.lastAt = tnow;
+
+    var alive = tnow - combo.lastAt < COMBO_HOLD_MS;
     for (var code in KEYDIR) {
-      var on = input.keys[code] ||
-        (input.pressed[code] && tnow - input.pressed[code] < COMBINE_MS);
-      if (!on) continue;
+      if (!input.keys[code] && !(alive && combo.codes[code])) continue;
       x += KEYDIR[code][0];
       y += KEYDIR[code][1];
     }
@@ -401,7 +448,7 @@ SK.Game = (function () {
 
     jmp.addEventListener('pointerdown', function (e) {
       e.preventDefault();
-      input.jump = true;
+      requestJump();
       input.jumpHeld = true;
       try { jmp.setPointerCapture(e.pointerId); } catch (_) { }
       jmp.classList.add('active');
@@ -569,15 +616,21 @@ SK.Game = (function () {
     // 조준 버퍼(COMBINE_MS)는 키 이벤트가 없어도 만료돼야 하므로 매 프레임 다시 센다
     syncKeyDir();
 
-    var wantJump = input.jump || input.jumpHeld;
+    // 이번 프레임에 플레이어가 '뛸 수 있는 상태'였는가 — 요청 소비 판단의 기준
+    var couldAct = !player.hopping && player.cooldown <= 0 && player.stunTimer <= 0;
+    var wantJump = input.jumpHeld || jumpPending();
     var wasHopping = player.hopping;
     SK.Player.update(player, { dx: input.dx, dy: input.dy, jump: wantJump }, dt, worldApi, {
       onTakeoff: function (power) { SK.Audio.whoosh(power, panOf(player.x, player.y)); },
       onLand: function (intensity, power, i, j) { land(intensity, power, i, j); }
     });
-    input.jump = false;
-    // 뛰고 나면 버퍼를 비운다 — 안 그러면 직전 방향이 다음 조준에 섞여 든다
-    if (!wasHopping && player.hopping) clearKeyCombine();
+    if (!wasHopping && player.hopping) {
+      // 방향 조준 버퍼를 비운다 — 안 그러면 직전 방향이 다음 조준에 섞여 든다
+      clearKeyCombine();
+    }
+    // 뛸 기회가 있었던 프레임에서만 점프 요청을 소비한다.
+    // 못 뛰는 구간이었다면 그대로 남겨 두었다가 기회가 오는 순간 발동시킨다.
+    if (couldAct) consumeJump();
 
     // 점프 궤적 (소리 ↔ 시각 연결)
     if (player.hopping && Math.random() < 0.55) {
@@ -933,7 +986,7 @@ SK.Game = (function () {
         land(power > 1 ? 1 : 0.5, power || 1, i, j);
         return fsm.progress.slice();
       },
-      press: function (dx, dy, jump) { input.dx = dx; input.dy = dy; if (jump) input.jump = true; },
+      press: function (dx, dy, jump) { input.dx = dx; input.dy = dy; if (jump) requestJump(); },
       release: function () { input.dx = 0; input.dy = 0; },
       safeRect: safeRect,
       /** 지금 조준 표시가 켜진 타일 수 (0 또는 1) */
@@ -946,15 +999,15 @@ SK.Game = (function () {
       },
       input: function () {
         var held = [], buf = [], tnow = performance.now();
+        var alive = tnow - combo.lastAt < COMBO_HOLD_MS;
         for (var c in KEYDIR) {
           if (input.keys[c]) held.push(c);
-          if (input.pressed[c] && tnow - input.pressed[c] < COMBINE_MS) {
-            buf.push(c + '(' + Math.round(tnow - input.pressed[c]) + 'ms)');
-          }
+          if (alive && combo.codes[c]) buf.push(c);
         }
         var d = player && player.aimDir;
         return {
-          dx: input.dx, dy: input.dy, jump: input.jump, jumpHeld: input.jumpHeld,
+          dx: input.dx, dy: input.dy, jumpPending: jumpPending(),
+          jumpAgo: Math.round(performance.now() - input.jumpAt), jumpHeld: input.jumpHeld,
           held: held, buffered: buf,
           aimDir: d ? (d.di + ',' + d.dj) : null,
           aimHold: player ? Math.round((player.aimHold || 0) * 1000) : 0,
