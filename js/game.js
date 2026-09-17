@@ -14,16 +14,11 @@ SK.Game = (function () {
   var GRID = 5;
   var START = { i: 2, j: 2 };
 
-  /* 발판 없이 비워 두는 칸의 비율 · 빠졌을 때 잃는 점수 */
-  var GAP_RATIO = 0.1;
-  var FALL_PENALTY = 15;
-
   // 배경 바닥 재질 — 밟을 때마다 소리가 달라지도록 섞는다
   var AMBIENT_MATS = [
-    'wood', 'keycap', 'cotton', 'leaf', 'bubble', 'sand',
-    'snow', 'glass', 'sponge', 'slime', 'orbeez', 'water',
-    'gravel', 'moss', 'foam', 'paper', 'ice', 'wood',
-    'gravel', 'water', 'moss', 'ice', 'paper', 'foam'
+    'wood', 'wood', 'keycap', 'cotton', 'leaf', 'bubble',
+    'sand', 'snow', 'glass', 'sponge', 'slime', 'orbeez',
+    'wood', 'sand', 'bubble', 'snow'
   ];
 
   function ambientMat(i, j) {
@@ -46,7 +41,40 @@ SK.Game = (function () {
   var phaseTimer = 0;
   var ui = {};
 
-  var input = { dx: 0, dy: 0, jump: false, jumpHeld: false, keys: Object.create(null) };
+  var input = { dx: 0, dy: 0, jumpAt: -1e9, jumpHeld: false,
+                keys: Object.create(null) };
+
+  /* 점프 입력 버퍼.
+   *
+   *  ⚠ 예전에는 도약 중에 누른 점프가 **통째로 버려졌다**. 도약은 0.30초(큰 점프
+   *  0.44초)이고 착지 후 쿨다운이 0.05초라, 연달아 움직이는 동안에는 상당 시간이
+   *  '못 뛰는 구간'이다. 그 구간에 누른 Space 는 그냥 사라졌다 — 플레이어에게는
+   *  "가끔 스페이스가 안 먹는다"로 보인다. 실제로 그랬다.
+   *
+   *  버퍼를 밀리초로 재는 것은 틀린 접근이었다. '못 뛰는 구간'의 길이가 도약 종류와
+   *  쿨다운에 따라 달라서, 고정 시간으로는 구간 초반의 입력을 늘 놓친다.
+   *
+   *  그래서 시간이 아니라 **기회**로 센다 — 요청은 플레이어가 실제로 뛸 수 있게 되는
+   *  프레임까지 살아 있고, 그 프레임에 소비된다(뛰었든, 갈 수 없는 방향이라 튕겼든).
+   *  못 뛰는 동안에는 아무리 오래여도 유지되므로 입력이 사라지지 않는다.
+   *  (조이스틱 '쿵' 버튼에도 똑같이 걸린다.) */
+  var JUMP_STALE_MS = 900;          // 탭이 멈춰 있었을 때를 대비한 안전장치
+
+  /* 제자리 내려찍기로 확정하기 전에 방향을 기다려 주는 시간.
+   *
+   *  ⚠ 조준과 점프를 **거의 동시에** 누르면, 방향 키가 몇 ms 늦게 도착하는 것만으로
+   *  그 프레임이 '방향 없음'이 되어 제자리 내려찍기로 끝나 버린다. 사람은 두 키를
+   *  정확히 같은 순간에 누르지 못하므로 이건 사실상 항상 일어난다 —
+   *  "조준하고 바로 눌렀는데 안 움직인다"의 정체다.
+   *
+   *  그래서 **조준이 없을 때만** 점프 판정을 이만큼 미룬다. 그 사이에 방향이 오면
+   *  그 칸으로 뛰고, 끝내 안 오면 그때 내려찍는다. 조준이 이미 있으면 한 프레임도
+   *  기다리지 않으므로 평소 반응은 그대로다. */
+  var STOMP_GRACE_MS = 130;
+
+  function requestJump() { input.jumpAt = performance.now(); }
+  function consumeJump() { input.jumpAt = -1e9; }
+  function jumpPending() { return performance.now() - input.jumpAt < JUMP_STALE_MS; }
 
   /* =========================================================
    *  좌표 변환 — 타일 간격을 반영한 격자 → 화면
@@ -84,6 +112,17 @@ SK.Game = (function () {
     START = { i: (GRID - 1) >> 1, j: (GRID - 1) >> 1 };
   }
 
+  /* 보드에 빈 칸(구멍)을 낸다.
+   *
+   *  전부 타일로 채우면 어디로 뛰든 안전해서 조준할 이유가 없다. 구멍이 있어야
+   *  "어디로 뛸지"가 선택이 된다. 다만 두 가지를 반드시 지켜야 한다.
+   *    · 시작 칸은 절대 구멍이 아니다
+   *    · 남은 타일이 **하나로 이어져 있어야** 한다 — 섬이 생기면 문제 글자를
+   *      영영 못 밟는 판이 만들어진다. 그래서 구멍을 하나 뚫을 때마다
+   *      연결성을 검사하고, 끊기면 되돌린다.
+   */
+  var HOLE_RATIO = 0.16;
+
   function buildWorld() {
     tiles = []; tileAt = {};
     for (var i = 0; i < GRID; i++) {
@@ -93,22 +132,53 @@ SK.Game = (function () {
         tileAt[i + ',' + j] = t;
       }
     }
-    placeGaps();
+    carveHoles();
   }
 
-  /** 발판이 아예 없는 빈칸을 몇 개 뚫는다 — 디디면 떨어져 점수를 잃는다 */
-  function placeGaps() {
+  /** 남은 타일이 전부 이어져 있는가 (8방향 이웃 기준) */
+  function allConnected() {
+    var total = 0, startKey = null;
+    for (var k in tileAt) { total++; if (startKey === null) startKey = k; }
+    if (!total) return false;
+    var seen = Object.create(null), queue = [startKey];
+    seen[startKey] = true;
+    var DIRS = SK.Player.DIRS;
+    while (queue.length) {
+      var parts = queue.pop().split(',');
+      var ci = +parts[0], cj = +parts[1];
+      for (var d = 0; d < DIRS.length; d++) {
+        var key = (ci + DIRS[d].di) + ',' + (cj + DIRS[d].dj);
+        if (tileAt[key] && !seen[key]) { seen[key] = true; queue.push(key); }
+      }
+    }
+    var reached = 0;
+    for (var s2 in seen) reached++;
+    return reached === total;
+  }
+
+  function carveHoles() {
     var cand = [];
-    for (var k = 0; k < tiles.length; k++) {
-      var t = tiles[k];
-      t.gap = false;
-      if (t.i === START.i && t.j === START.j) continue;
-      if (player && t.i === player.ci && t.j === player.cj) continue;
-      cand.push(t);
+    for (var i = 0; i < GRID; i++) {
+      for (var j = 0; j < GRID; j++) {
+        if (i === START.i && j === START.j) continue;     // 시작 칸은 남긴다
+        cand.push({ i: i, j: j });
+      }
     }
     cand = SK.Quiz.shuffle(cand);
-    var n = Math.min(cand.length, Math.max(1, Math.round(tiles.length * GAP_RATIO)));
-    for (var g = 0; g < n; g++) cand[g].gap = true;
+
+    var want = Math.round(GRID * GRID * HOLE_RATIO);
+    for (var n = 0; n < cand.length && want > 0; n++) {
+      var c = cand[n], key = c.i + ',' + c.j;
+      var t = tileAt[key];
+      if (!t) continue;
+      delete tileAt[key];
+      if (allConnected()) {
+        tiles.splice(tiles.indexOf(t), 1);                // 진짜로 없앤다
+        want--;
+      } else {
+        tileAt[key] = t;                                  // 섬이 생기면 되돌린다
+      }
+    }
   }
 
   function getTile(i, j) { return tileAt[i + ',' + j] || null; }
@@ -135,13 +205,14 @@ SK.Game = (function () {
     renderHUD(true);
   }
 
-  /** 문제 타일을 바닥에 뿌린다 — 밟힌 흔적과 균열은 그대로 둔다 */
+  /** 문제 타일을 바닥에 뿌린다 */
   function layoutQuiz(q) {
     for (var k = 0; k < quizTiles.length; k++) {
       var old = quizTiles[k];
       old.label = null; old.role = 'plain'; old.payload = null;
-      old.state = 'idle'; old.order = -1; old.correct = false;
+      old.state = 'idle'; old.hi = 0; old.order = -1; old.correct = false;
       old.mat = ambientMat(old.i, old.j);
+      SK.Tiles.reset(old);
     }
     quizTiles = [];
 
@@ -158,7 +229,9 @@ SK.Game = (function () {
       t.order = it.order;
       t.correct = it.correct;
       t.state = 'idle';
+      t.hi = 0;
       t.mat = q.material;
+      SK.Tiles.reset(t);
       quizTiles.push(t);
     }
   }
@@ -169,7 +242,7 @@ SK.Game = (function () {
     for (var i = 0; i < GRID; i++) {
       for (var j = 0; j < GRID; j++) {
         if (player && i === player.ci && j === player.cj) continue;
-        if (!SK.Tiles.isSolid(getTile(i, j))) continue;   // 빈칸·부서진 자리는 빼고
+        if (!getTile(i, j)) continue;          // 구멍에는 글자를 놓을 수 없다
         cand.push({ i: i, j: j });
       }
     }
@@ -179,42 +252,217 @@ SK.Game = (function () {
   /* =========================================================
    *  입력 — 키보드
    * ======================================================= */
-  var KEYMAP = {
-    ArrowUp: 'up', KeyW: 'up',
-    ArrowDown: 'down', KeyS: 'down',
-    ArrowLeft: 'left', KeyA: 'left',
-    ArrowRight: 'right', KeyD: 'right',
-    Space: 'jump', Enter: 'jump'
+  /* 키 하나가 곧 화면 방향 벡터다.
+   *
+   *  ⚠ **대각선을 동시입력에 기대지 않는다**
+   *  대각선 + 점프는 `↑`+`←`+`Space` 로 세 키 동시입력이다. 값싼 키보드는 3키
+   *  롤오버를 전부 받아 주지 못하고, 막히는 조합은 키 매트릭스 배선마다 다르다.
+   *  특히 방향키 네 개는 서로 붙어 배선돼 있어 자주 걸린다 — "WASD로는 되는데
+   *  방향키로는 대각선이 안 된다"가 실제 증상이다. 도착하지 않은 키 이벤트는
+   *  JS에서 되살릴 수 없으므로, 애초에 동시에 누르지 않아도 되게 만든다.
+   *
+   *  대비책이 셋이다.
+   *   1) Q·E·Z·C(넘패드 7·9·1·3) — **키 하나가 대각선 하나**
+   *   2) TAP_HOLD_MS — 방금 톡 누른 방향 키가 그 축을 잠깐 맡아 준다.
+   *      `↑` 톡 → `←` 톡 처럼 **번갈아 눌러도** 대각선 조준이 된다.
+   *   3) Player 의 AIM_HOLD — 방향을 떼고 점프해도 조준이 잠깐 남아 있다.
+   *  셋 다 **조준**만 돕는다. 움직이려면 반드시 점프 키를 눌러야 한다.
+   */
+  /* 방향 입력을 **축마다 따로** 정한다 — 가로(x)와 세로(y).
+   *
+   *  ⚠ 예전에는 최근에 눌린 키들을 '묶음' 하나에 모아 벡터를 전부 더했다. 그런데
+   *  뗀 키가 묶음에 그대로 남아서, 방향키를 마구 누르면 ←와 →가 한 묶음에 같이
+   *  들어가 **서로 상쇄되어 조준이 0**이 됐다. 실제로 재현했다 —
+   *  →와 ↓만 누르고 있는데도 조준선이 사라지고, 그 상태로 점프하면 제자리
+   *  내려찍기가 된다. "마구 누르면 점선이 사라진다"와 "방향키 2개 + Space가
+   *  안 먹는다"가 같은 원인이었다.
+   *
+   *  규칙을 뒤집었다.
+   *    · 그 축에 **지금 눌려 있는 키가 하나라도 있으면 그것만으로** 값을 정한다.
+   *      (←와 →를 실제로 같이 누르고 있으면 0이 맞다 — 그건 의도된 상쇄다)
+   *    · 눌린 키가 없는 축만 **가장 최근에 톡 눌린 키 하나**로 채운다.
+   *      축마다 하나만 기억하므로 반대 방향이 누적될 수 없다.
+   *
+   *  이러면 ↓ 톡 → 톡(순차 입력)도, ↓+→ 동시 누르기도 똑같이 대각선이 되고,
+   *  아무리 마구 눌러도 조준이 0에 갇히지 않는다. */
+  /*  수명은 축마다 따로 세지 않고 **마지막 방향 입력 하나**를 기준으로 함께 센다.
+   *  `↓` 톡 `→` 톡 처럼 이어 누를 때, 먼저 누른 ↓ 가 혼자 만료돼 버리면 마지막
+   *  순간에 대각선이 풀리기 때문이다. 이어지는 동안에는 함께 살아 있고, 손을
+   *  멈추면 함께 사라진다.
+   *
+   *  CHAIN_MS 보다 오래 쉬었다가 새로 누르면 **이전 조준을 버리고 새로 시작**한다.
+   *  그래야 한참 전에 눌렀던 ← 가 지금 누른 ↑ 에 멋대로 붙어 ↖ 가 되지 않는다. */
+  var TAP_HOLD_MS = 420;     // 마지막 방향 입력 뒤 톡 기억이 유지되는 시간
+  var CHAIN_MS = 450;        // 이 간격 안에 이어 누르면 같은 조준으로 합친다
+
+  var tapX = { code: null };
+  var tapY = { code: null };
+  var lastDirAt = -1e9;      // 마지막 방향 키 입력 시각
+  var KEYDIR = {
+    ArrowUp: [0, -1], KeyW: [0, -1],
+    ArrowDown: [0, 1], KeyS: [0, 1],
+    ArrowLeft: [-1, 0], KeyA: [-1, 0],
+    ArrowRight: [1, 0], KeyD: [1, 0],
+
+    KeyQ: [-1, -1], KeyE: [1, -1], KeyZ: [-1, 1], KeyC: [1, 1],
+
+    Numpad8: [0, -1], Numpad2: [0, 1], Numpad4: [-1, 0], Numpad6: [1, 0],
+    Numpad7: [-1, -1], Numpad9: [1, -1], Numpad1: [-1, 1], Numpad3: [1, 1]
   };
+  /* 점프 키를 키보드 곳곳에 깔아 둔다.
+     Space 가 삼켜지는 키보드라도 매트릭스 행이 다른 키 하나는 살아남는다. */
+  var JUMPKEY = {
+    Space: 1, Enter: 1, NumpadEnter: 1, Numpad0: 1, Numpad5: 1, NumpadAdd: 1,
+    ShiftRight: 1, ControlRight: 1, Period: 1, Slash: 1,
+    KeyJ: 1, KeyK: 1, KeyF: 1
+  };
+
 
   function bindKeys() {
     window.addEventListener('keydown', function (e) {
-      var k = KEYMAP[e.code];
-      if (!k) return;
+      if (JUMPKEY[e.code]) {
+        e.preventDefault();
+        if (!input.keys[e.code]) { requestJump(); if (diagEl) pushDiag('down', e.code); }
+        input.keys[e.code] = true;
+        input.jumpHeld = true;
+        return;
+      }
+      if (!KEYDIR[e.code]) return;
       e.preventDefault();
-      if (k === 'jump') { if (!input.keys.jump) input.jump = true; input.jumpHeld = true; }
-      input.keys[k] = true;
+      /* e.repeat 으로 자동 반복을 거른다. input.keys 로 판별하면, keyup 이 유실돼
+         계속 '눌린 상태'로 남은 키는 다시 눌러도 새 입력으로 인정되지 않는다 —
+         키가 통째로 죽어 버린다. e.repeat 은 그 상황에서도 false 로 오므로
+         유실된 keyup 을 저절로 복구하는 효과가 있다. */
+      if (!e.repeat) {
+        var tnow = performance.now();
+        // 한참 쉬었다 누른 것이면 이전 조준은 버리고 새로 시작한다
+        if (tnow - lastDirAt > CHAIN_MS) { tapX.code = null; tapY.code = null; }
+        if (KEYDIR[e.code][0]) tapX.code = e.code;
+        if (KEYDIR[e.code][1]) tapY.code = e.code;
+        lastDirAt = tnow;
+      }
+      input.keys[e.code] = true;
+      if (keyLog) logKey('down', e.code);
+      if (diagEl) pushDiag('down', e.code);
       syncKeyDir();
     });
     window.addEventListener('keyup', function (e) {
-      var k = KEYMAP[e.code];
-      if (!k) return;
+      if (JUMPKEY[e.code]) {
+        e.preventDefault();
+        input.keys[e.code] = false;
+        if (diagEl) pushDiag('up', e.code);
+        // 점프 키를 여러 개 두었으므로, 하나를 떼도 다른 하나가 눌려 있으면 유지한다
+        input.jumpHeld = anyHeld(JUMPKEY);
+        return;
+      }
+      if (!KEYDIR[e.code]) return;
       e.preventDefault();
-      if (k === 'jump') input.jumpHeld = false;
-      input.keys[k] = false;
+      input.keys[e.code] = false;
+      if (keyLog) logKey('up  ', e.code);
+      if (diagEl) pushDiag('up', e.code);
       syncKeyDir();
     });
     window.addEventListener('blur', function () {
       input.keys = Object.create(null);
+      tapX.code = tapY.code = null;
+      lastDirAt = -1e9;
       input.jumpHeld = false;
       syncKeyDir();
     });
   }
 
+  function anyHeld(set) {
+    for (var c in set) if (input.keys[c]) return true;
+    return false;
+  }
+
+  /* 키가 실제로 브라우저에 도착하는지 확인하는 진단용 로그.
+     콘솔에서 SK.Game.debug.keyLog(true) 로 켠다. */
+  var keyLog = false;
+  function logKey(kind, code) {
+    if (!window.console) return;
+    var held = [];
+    for (var c in KEYDIR) if (input.keys[c]) held.push(c);
+    console.log('[key] ' + kind + ' ' + code + '   held=[' + held.join(' ') + ']');
+  }
+
+  /* ---------- 입력 진단 패널 ----------
+   *
+   *  "키를 눌렀는데 안 먹는다"는 원인이 둘 중 하나다 — 게임이 잘못 처리했거나,
+   *  **키 이벤트가 브라우저에 아예 도착하지 않았거나**. 둘은 증상이 똑같아서
+   *  화면만 봐서는 구별할 수 없다. 이 패널은 도착한 키를 그대로 보여 주므로
+   *  한눈에 갈린다 — Space 를 눌렀는데 목록에 안 뜨면 키보드가 삼킨 것이다. */
+  var diagEl = null, diagLog = [];
+
+  function setDiag(on) {
+    if (!on) { if (diagEl) { diagEl.remove(); diagEl = null; } return false; }
+    if (!diagEl) {
+      diagEl = document.createElement('div');
+      diagEl.id = 'inputDiag';
+      document.body.appendChild(diagEl);
+    }
+    return true;
+  }
+  function isDiag() { return !!diagEl; }
+
+  function shortKey(code) { return code.replace('Arrow', '').replace('Key', ''); }
+
+  function pushDiag(kind, code) {
+    diagLog.push((kind === 'down' ? '▼' : '△') + shortKey(code));
+    if (diagLog.length > 8) diagLog.shift();
+  }
+
+  function renderDiag() {
+    if (!diagEl) return;
+    var held = [], c, j;
+    for (c in KEYDIR) if (input.keys[c]) held.push(shortKey(c));
+    for (j in JUMPKEY) if (input.keys[j]) held.push(shortKey(j));
+    var d = player && player.aimDir;
+    diagEl.innerHTML =
+      '<b>입력 진단</b>' +
+      '<div>받은 키 ' + (diagLog.join(' ') || '—') + '</div>' +
+      '<div>지금 눌림 <b>' + (held.join(' + ') || '—') + '</b></div>' +
+      '<div>방향 ' + input.dx + ',' + input.dy +
+        '  조준 <b>' + (d ? (d.di + ',' + d.dj) : '없음') + '</b></div>' +
+      '<div>점프 ' + (input.jumpHeld ? '누름' : (jumpPending() ? '대기' : '—')) +
+        '</div>';
+  }
+
+  /** 톡 입력 기억을 비운다 — 뛰고 나면 새로 잡아야 한다.
+      누르고 있는 키는 어차피 '눌린 키' 쪽에서 읽으므로 따로 남길 필요가 없다. */
+  function clearKeyCombine() {
+    tapX.code = tapY.code = null;
+    lastDirAt = -1e9;
+  }
+
+  /**
+   * 한 축(0=가로, 1=세로)의 값을 정한다.
+   * 지금 눌려 있는 키가 있으면 그것만 쓰고, 없을 때만 최근에 톡 누른 키로 채운다.
+   */
+  function axisValue(idx, tap, tapAlive) {
+    var sum = 0, live = false;
+    for (var code in KEYDIR) {
+      var v = KEYDIR[code][idx];
+      if (!v || !input.keys[code]) continue;
+      sum += v; live = true;
+    }
+    if (live) return Math.max(-1, Math.min(1, sum));
+    if (tapAlive && tap.code) return KEYDIR[tap.code][idx];
+    return 0;
+  }
+
+  /** 축마다 따로 값을 정한다 — 반대 방향이 누적돼 조준이 0에 갇히지 않게 */
   function syncKeyDir() {
     if (padActive) return;                 // 조이스틱 입력이 우선
-    input.dx = (input.keys.right ? 1 : 0) - (input.keys.left ? 1 : 0);
-    input.dy = (input.keys.down ? 1 : 0) - (input.keys.up ? 1 : 0);
+    var tnow = performance.now();
+    // 누르고 있는 키가 있으면 톡 기억의 수명을 계속 갱신한다 — 누른 채로 있는 동안
+    // 조준이 저절로 풀리지 않게, 그리고 keyup 이 유실돼도 곧바로 무너지지 않게
+    for (var h in KEYDIR) { if (input.keys[h]) { lastDirAt = tnow; break; } }
+    var tapAlive = tnow - lastDirAt < TAP_HOLD_MS;
+    var x = axisValue(0, tapX, tapAlive);
+    var y = axisValue(1, tapY, tapAlive);
+    input.dx = x;
+    input.dy = y;
   }
 
   /* =========================================================
@@ -222,23 +470,70 @@ SK.Game = (function () {
    *  터치·마우스·스타일러스를 같은 코드로 처리한다.
    * ======================================================= */
   var padActive = false;
+  var padAimEl = null;
+
+  /* 조이스틱 조작감을 좌우하는 값들.
+   *
+   *  · 원점은 패드 한가운데가 아니라 **손가락이 처음 닿은 자리**다(플로팅 스틱).
+   *    고정 원점이면 패드 가장자리를 짚는 순간 그 방향이 곧바로 입력돼서,
+   *    "잡자마자 엉뚱한 데를 조준한다"가 된다.
+   *  · 손가락이 반경 밖으로 나가면 원점이 따라가며(리센터) 스틱이 계속 살아 있다.
+   *  · 데드존은 픽셀이 아니라 반경 비율로 잡는다 — 화면 크기가 달라도 감이 같다.
+   */
+  var DEAD = 0.26;          // 반경 대비 데드존
+  var SMOOTH = 0.45;        // 방향 벡터 지수 평활 — 손 떨림을 걸러 낸다
 
   function bindVirtualControls() {
     var pad = document.getElementById('touchPad');
     var nub = document.getElementById('touchNub');
     var jmp = document.getElementById('touchJump');
     if (!pad || !jmp) return;
+    padAimEl = document.getElementById('touchAim');
 
     var padId = null, cx = 0, cy = 0, radius = 46;
+    var sx = 0, sy = 0;                              // 평활된 방향 벡터
 
     function updateFrom(e) {
       var dx = e.clientX - cx, dy = e.clientY - cy;
       var len = Math.hypot(dx, dy);
-      var k = len > radius ? radius / len : 1;
-      nub.style.transform = 'translate(' + (dx * k) + 'px,' + (dy * k) + 'px)';
-      if (len < 12) { input.dx = 0; input.dy = 0; return; }
-      input.dx = dx / len;
-      input.dy = dy / len;
+
+      // 반경을 넘어가면 원점을 끌고 간다 — 손가락이 패드 밖으로 나가도 계속 조작된다
+      if (len > radius) {
+        var over = (len - radius) / len;
+        cx += dx * over; cy += dy * over;
+        dx -= dx * over; dy -= dy * over;
+        len = radius;
+      }
+
+      nub.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+
+      var mag = len / radius;
+      if (mag < DEAD) {
+        sx = sy = 0;
+        input.dx = 0; input.dy = 0;
+        if (padAimEl) padAimEl.style.opacity = '0';
+        return;
+      }
+      // 데드존 바깥을 0~1로 다시 펼친다(데드존 경계에서 값이 튀지 않게)
+      var k = (mag - DEAD) / (1 - DEAD) / len;
+      var tx = dx * k, ty = dy * k;
+      sx += (tx - sx) * SMOOTH;
+      sy += (ty - sy) * SMOOTH;
+      input.dx = sx; input.dy = sy;
+      showPadAim(radius);
+    }
+
+    /** 스틱이 어느 칸으로 확정됐는지 패드 위에 점으로 보여 준다 */
+    function showPadAim(r) {
+      if (!padAimEl) return;
+      var dir = SK.Player.quantize(input.dx, input.dy, player && player.aimDir);
+      if (!dir) { padAimEl.style.opacity = '0'; return; }
+      var ax = (dir.di - dir.dj) * (SK.Iso.TW / 2);
+      var ay = (dir.di + dir.dj) * (SK.Iso.TH / 2);
+      var n = Math.hypot(ax, ay) || 1;
+      padAimEl.style.opacity = '1';
+      padAimEl.style.transform =
+        'translate(' + (ax / n * r * 0.92) + 'px,' + (ay / n * r * 0.92) + 'px)';
     }
 
     pad.addEventListener('pointerdown', function (e) {
@@ -247,10 +542,17 @@ SK.Game = (function () {
       padActive = true;
       try { pad.setPointerCapture(e.pointerId); } catch (_) { }
       var r = pad.getBoundingClientRect();
-      cx = r.left + r.width / 2; cy = r.top + r.height / 2;
-      radius = r.width * 0.38;
+      radius = r.width * 0.42;
+      // 짚은 자리를 원점으로. 단, 패드 밖(확장 히트영역)을 짚었다면 가운데로 당겨 둔다.
+      var mx = r.left + r.width / 2, my = r.top + r.height / 2;
+      var ox = e.clientX - mx, oy = e.clientY - my;
+      var od = Math.hypot(ox, oy);
+      var pull = od > radius ? radius / od : 1;
+      cx = mx + ox * pull; cy = my + oy * pull;
+      sx = sy = 0;
+      input.dx = 0; input.dy = 0;
+      nub.style.transform = 'translate(' + (cx - mx) + 'px,' + (cy - my) + 'px)';
       pad.classList.add('active');
-      updateFrom(e);
     });
     pad.addEventListener('pointermove', function (e) {
       if (e.pointerId !== padId) return;
@@ -260,8 +562,10 @@ SK.Game = (function () {
     function endPad(e) {
       if (padId !== null && e.pointerId !== padId) return;
       padId = null; padActive = false;
+      sx = sy = 0;
       input.dx = 0; input.dy = 0;
       nub.style.transform = '';
+      if (padAimEl) padAimEl.style.opacity = '0';
       pad.classList.remove('active');
       syncKeyDir();
     }
@@ -270,7 +574,7 @@ SK.Game = (function () {
 
     jmp.addEventListener('pointerdown', function (e) {
       e.preventDefault();
-      input.jump = true;
+      requestJump();
       input.jumpHeld = true;
       try { jmp.setPointerCapture(e.pointerId); } catch (_) { }
       jmp.classList.add('active');
@@ -407,21 +711,29 @@ SK.Game = (function () {
   /* =========================================================
    *  루프
    * ======================================================= */
+  var loopErrors = 0;
+
   function loop(ts) {
     var dt = Math.min(0.05, (ts - lastT) / 1000);
     lastT = ts; now = ts / 1000;
-    update(dt);
-    render();
+    /* 한 프레임에서 예외가 나면 requestAnimationFrame 재예약까지 건너뛰어
+       **게임이 통째로 멈춘다**. 실제로 입력 코드의 변수 이름 충돌 하나로 그렇게
+       얼어붙은 적이 있다 — 화면은 멀쩡해 보이는데 키가 안 먹는 상태가 된다.
+       예외를 여기서 막고 루프는 계속 돌린다. 처음 몇 번은 콘솔에 남긴다. */
+    try {
+      update(dt);
+      render();
+      renderDiag();
+    } catch (err) {
+      if (loopErrors++ < 3 && window.console) console.error('[loop]', err);
+    }
     requestAnimationFrame(loop);
   }
 
   var worldApi = {
-    // 빈칸도 뛰어들 수는 있다 — 대신 떨어져서 점수를 잃는다
-    canEnter: function (i, j) {
-      if (!inBounds(i, j)) return false;
-      var t = getTile(i, j);
-      return !!t && (t.gap || SK.Tiles.isSolid(t));
-    },
+    /* 보드 안이면 구멍이라도 뛸 수 있다 — 떨어지는 것도 플레이어의 선택이다.
+       (보드 밖은 여전히 막는다. 화면 밖으로 사라지면 복구할 자리가 없다) */
+    canEnter: function (i, j) { return inBounds(i, j); },
     surfaceOf: function (i, j) {
       return SK.Tiles.surfaceOffset(getTile(i, j));
     }
@@ -437,20 +749,38 @@ SK.Game = (function () {
     }
 
     // 점프 입력은 '눌림 유지' 방식 — 조준을 먼저 잡고 눌러도, 누른 채 조준을 바꿔도 뛴다
-    var wantJump = input.jump || input.jumpHeld;
+    // 톡 입력(TAP_HOLD_MS)은 키 이벤트가 없어도 만료돼야 하므로 매 프레임 다시 센다
+    syncKeyDir();
+
+    // 이번 프레임에 플레이어가 '뛸 수 있는 상태'였는가 — 요청 소비 판단의 기준
+    var couldAct = !player.hopping && player.cooldown <= 0 && player.stunTimer <= 0;
+
+    // 조준이 아직 없는 점프 요청은 STOMP_GRACE_MS 동안 붙들고 방향을 기다린다
+    var hasAim = !!(input.dx || input.dy || player.aimDir);
+    var waitingForAim = !hasAim && (performance.now() - input.jumpAt < STOMP_GRACE_MS);
+
+    var wantJump = (input.jumpHeld || jumpPending()) && !waitingForAim;
+    var wasHopping = player.hopping;
     SK.Player.update(player, { dx: input.dx, dy: input.dy, jump: wantJump }, dt, worldApi, {
       onTakeoff: function (power) { SK.Audio.whoosh(power, panOf(player.x, player.y)); },
       onLand: function (intensity, power, i, j) { land(intensity, power, i, j); }
     });
-    input.jump = false;
+    if (!wasHopping && player.hopping) {
+      // 방향 조준 버퍼를 비운다 — 안 그러면 직전 방향이 다음 조준에 섞여 든다
+      clearKeyCombine();
+    }
+    // 뛸 기회가 있었던 프레임에서만 점프 요청을 소비한다.
+    // 못 뛰는 구간이거나 방향을 기다리는 중이면 그대로 남겨 둔다.
+    if (couldAct && !waitingForAim) consumeJump();
 
     // 점프 궤적 (소리 ↔ 시각 연결)
     if (player.hopping && Math.random() < 0.55) {
       SK.Particles.trail(player.x, player.y, player.z * 0.9, player.power);
     }
 
-    for (var i = 0; i < tiles.length; i++) SK.Tiles.update(tiles[i], dt);
+    for (var i = 0; i < tiles.length; i++) SK.Tiles.update(tiles[i], dt, now);
     updateAim(dt);
+    updateHints(dt);
 
     // 카메라 — 보드 중심에서 캐릭터 쪽으로 조금만 따라간다
     var bc = world((GRID - 1) / 2, (GRID - 1) / 2, 0);
@@ -465,13 +795,25 @@ SK.Game = (function () {
   }
 
   /** 지금 점프하면 어디에 착지하는지 타일에 표시한다 */
+  /* 구멍을 조준했을 때의 경고 표시.
+     타일이 없으니 t.aim 에 실을 수 없어 따로 들고 다닌다. 표시가 아예 없으면
+     플레이어는 "방향이 안 잡혔다"고 오해한다 — 그건 조준이 사라지는 버그와
+     구별되지 않는다. 그래서 구멍도 반드시 무언가를 보여 준다. */
+  var holeAim = { i: 0, j: 0, a: 0 };
+
   function updateAim(dt) {
-    var target = null;
-    if (!player.hopping && !player.falling && player.stunTimer <= 0 && player.aimDir) {
+    var target = null, holeTarget = null;
+    if (!player.hopping && player.stunTimer <= 0 && player.aimDir) {
       var ni = player.ci + player.aimDir.di;
       var nj = player.cj + player.aimDir.dj;
-      if (worldApi.canEnter(ni, nj)) target = getTile(ni, nj);
+      if (worldApi.canEnter(ni, nj)) {
+        target = getTile(ni, nj);
+        if (!target) holeTarget = { i: ni, j: nj };
+      }
     }
+    if (holeTarget) { holeAim.i = holeTarget.i; holeAim.j = holeTarget.j; }
+    holeAim.a += ((holeTarget ? 1 : 0) - holeAim.a) * Math.min(1, dt * 14);
+    if (holeAim.a < 0.01) holeAim.a = 0;
     for (var k = 0; k < tiles.length; k++) {
       var t = tiles[k];
       var want = (t === target) ? 1 : 0;
@@ -480,24 +822,35 @@ SK.Game = (function () {
     }
   }
 
+  function updateHints(dt) {
+    var show = fsm && fsm.quiz && fsm.mistakes >= 2 && phase === 'play';
+    var exp = show ? fsm.expected() : null;
+    for (var k = 0; k < quizTiles.length; k++) {
+      var t = quizTiles[k];
+      var want = (exp != null && t.payload === exp) ? 1 : 0;
+      t.hi += (want - t.hi) * Math.min(1, dt * 6);
+      if (t.hi < 0.01) t.hi = 0;
+    }
+  }
+
   /* =========================================================
    *  착지 — 소리와 시각 효과를 항상 함께 낸다
    * ======================================================= */
   function land(intensity, power, i, j) {
     var t = getTile(i, j);
-    if (!t) return;
-    if (t.gap) { fallInto(t); return; }
+    if (!t) { fallIntoHole(i, j); return; }
     var mat = t.mat;
     var pan = panOf(i, j), depth = depthOf(i, j);
 
-    var res = SK.Tiles.stomp(t, intensity, power);
+    var res = SK.Tiles.stomp(t, intensity, now, power);
 
     switch (res.sound) {
       case 'shatter':
         // 시각: Tiles.stomp 안에서 Particles.shatter 가 이미 터졌다
         SK.Audio.shatter(mat, { pan: pan, depth: depth });
-        cam.shake = Math.max(cam.shake, 0.55);
-        setFlash(0.32, SK.Particles.pal(mat).hue);
+        // 에어캡은 '부서지는' 게 아니라 알이 터지는 것이라 충격 연출을 줄인다
+        cam.shake = Math.max(cam.shake, mat === 'bubble' ? 0.22 : 0.55);
+        setFlash(mat === 'bubble' ? 0.14 : 0.32, SK.Particles.pal(mat).hue);
         break;
       case 'crack':
         SK.Audio.crack(mat, res.stage, res.total, { pan: pan, depth: depth });
@@ -519,83 +872,84 @@ SK.Game = (function () {
     }
 
     visit(t);
-
-    // 부서진 타일은 되살아나지 않는다. 아직 못 밟은 글자는 성한 칸으로 옮겨 준다
-    if (res.sound === 'shatter' && t.role === 'seq' && t.state !== 'done') relocateLabel(t);
-    renewBoardIfWorn();
   }
 
-  /** 글자가 얹힌 타일이 부서졌을 때 — 타일을 되살리는 대신 글자만 이사시킨다 */
-  function relocateLabel(t) {
-    var cand = [];
-    for (var k = 0; k < tiles.length; k++) {
-      var o = tiles[k];
-      if (o === t || o.label || o.damage > 0 || !SK.Tiles.isSolid(o)) continue;
-      if (o.i === player.ci && o.j === player.cj) continue;
-      cand.push(o);
-    }
-    if (!cand.length) return;
+  /** 구멍 조준 표시 — 붉은 점선과 아래로 떨어지는 화살표 */
+  function drawHoleAim(ctx, h) {
+    var p = world(h.i, h.j, 0);
+    var hw = SK.Iso.TW / 2, hh = SK.Iso.TH / 2;
+    var blink = 0.6 + 0.4 * Math.sin(now * 7);
 
-    var slot = quizTiles.indexOf(t);
-    if (slot < 0) return;
+    ctx.save();
+    ctx.globalAlpha = h.a;
+    ctx.translate(p.x, p.y);
 
-    var to = SK.Quiz.shuffle(cand)[0];
-    to.label = t.label; to.payload = t.payload; to.mat = t.mat;
-    to.role = 'seq'; to.order = t.order; to.correct = t.correct; to.state = 'idle';
-    quizTiles[slot] = to;
+    // 어두운 밑선 — 배경이 무엇이든 읽히게
+    ctx.strokeStyle = 'rgba(10,4,10,.8)';
+    ctx.lineWidth = 6; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -hh); ctx.lineTo(hw, 0); ctx.lineTo(0, hh); ctx.lineTo(-hw, 0);
+    ctx.closePath(); ctx.stroke();
 
-    t.label = null; t.payload = null; t.role = 'plain'; t.order = -1; t.correct = false;
+    ctx.strokeStyle = 'rgba(255,120,140,' + (0.6 + blink * 0.4) + ')';
+    ctx.lineWidth = 3.5;
+    ctx.setLineDash([8, 7]);
+    ctx.lineDashOffset = now * 30;
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-    // 어디로 옮겨 갔는지 보이지 않으면 글자를 잃어버린 것처럼 느껴진다
-    SK.Particles.stars(to.i, to.j, 12);
-    SK.Particles.ring(to.i, to.j, { size: 110, life: 0.5, width: 3, color: 'rgba(255,255,255,' });
+    ctx.fillStyle = 'rgba(255,120,140,' + (0.10 + blink * 0.10) + ')';
+    ctx.fill();
+
+    // 아래로 떨어지는 화살표 — "여기는 빈 칸" 이라고 말해 준다
+    ctx.strokeStyle = 'rgba(255,190,200,' + (0.5 + blink * 0.5) + ')';
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -9); ctx.lineTo(0, 7);
+    ctx.moveTo(-6, 1); ctx.lineTo(0, 8); ctx.lineTo(6, 1);
+    ctx.stroke();
+    ctx.restore();
   }
 
-  /**
-   * 성한 발판이 너무 줄면 새 산책 구역으로 갈아 끼운다.
-   * 부서진 타일을 되살리는 것이 아니라, 판 전체를 새로 까는 것이다 —
-   * 그러지 않으면 딛고 설 곳이 없어 문제를 풀 수 없게 된다.
-   */
-  function renewBoardIfWorn() {
-    var solid = 0;
-    for (var k = 0; k < tiles.length; k++) if (SK.Tiles.isSolid(tiles[k])) solid++;
+  /* =========================================================
+   *  구멍에 빠짐 — 점수를 잃고 직전 발판으로 돌아온다
+   * ======================================================= */
+  var FALL_PENALTY = 15;
 
-    var reachable = false;
-    for (var d = 0; d < SK.Player.DIRS.length; d++) {
-      var dir = SK.Player.DIRS[d];
-      if (SK.Tiles.isSolid(getTile(player.ci + dir.di, player.cj + dir.dj))) { reachable = true; break; }
-    }
-    if (reachable && solid >= Math.max(8, Math.round(tiles.length * 0.45))) return;
-
-    quizTiles = [];
-    buildWorld();
-    if (fsm && fsm.quiz) layoutQuiz(fsm.quiz);
-    SK.Particles.text(player.x, player.y, '새 산책 구역!', { size: 26, color: '#8ef0c0', gz: 1.2, life: 1.2 });
-  }
-
-  /** 빈칸에 발을 디뎠다 — 아래로 떨어지고 점수를 잃는다 */
-  function fallInto(t) {
-    var back = recoverCell(player.fromI, player.fromJ);
-    SK.Player.fall(player, back.i, back.j);
-
+  function fallIntoHole(i, j) {
+    phase = 'wrong';
+    phaseTimer = 1.0;
     streak = 0; combo = 0;
     score = Math.max(0, score - FALL_PENALTY);
 
-    SK.Audio.hollow({ pan: panOf(t.i, t.j) });
-    SK.Particles.ring(t.i, t.j, { size: 96, life: 0.5, color: 'rgba(120,132,200,' });
-    SK.Particles.text(t.i, t.j, '앗, 빈칸!', { size: 24, color: '#ff9aa8', life: 0.9, vz: 0.01 });
-    cam.shake = Math.max(cam.shake, 0.7);
-    renderHUD();
+    var pan = panOf(i, j);
+    SK.Audio.hollow({ pan: pan });
+    SK.Particles.text(i, j, '앗!', { size: 28, color: '#ff9aa8', life: 0.9, gz: 0.2, vz: 0.02 });
+    SK.Particles.text(i, j, '-' + FALL_PENALTY, { size: 20, color: '#ff9aa8', life: 1.0, gz: 0.7, vz: 0.03 });
+    SK.Particles.ring(i, j, { size: 110, life: 0.6, width: 3, color: 'rgba(255,154,168,' });
+    cam.shake = 0.7;
+    setFlash(0.22, 352);
+
+    // 직전에 서 있던 발판으로 돌려보낸다. 그 자리도 사라졌다면 가장 가까운 타일로.
+    var back = getTile(player.fromI, player.fromJ) ? { i: player.fromI, j: player.fromJ }
+                                                   : nearestTile(i, j);
+    player.ci = back.i; player.cj = back.j;
+    player.x = back.i; player.y = back.j; player.z = 0;
+    player.fromI = back.i; player.fromJ = back.j;
+    player.hopping = false;
+    player.surface = player.surfaceTarget = worldApi.surfaceOf(back.i, back.j);
+    SK.Player.stun(player, 0.55);
+
+    SK.Particles.ring(back.i, back.j, { size: 80, life: 0.45, width: 2.5, color: 'rgba(255,255,255,' });
+    renderHUD(false, true);
   }
 
-  /** 떨어진 뒤 돌아갈 칸 — 뛰어온 칸이 사라졌다면 가장 가까운 성한 타일로 */
-  function recoverCell(i, j) {
-    if (SK.Tiles.isSolid(getTile(i, j))) return { i: i, j: j };
+  /** 주어진 칸에서 가장 가까운 실제 타일 */
+  function nearestTile(i, j) {
     var best = null, bestD = Infinity;
     for (var k = 0; k < tiles.length; k++) {
       var t = tiles[k];
-      if (!SK.Tiles.isSolid(t)) continue;
-      var d = Math.abs(t.i - i) + Math.abs(t.j - j);
+      var d = (t.i - i) * (t.i - i) + (t.j - j) * (t.j - j);
       if (d < bestD) { bestD = d; best = t; }
     }
     return best ? { i: best.i, j: best.j } : { i: START.i, j: START.j };
@@ -618,6 +972,9 @@ SK.Game = (function () {
     if (r.type === 'progress' || r.type === 'solved') {
       t.state = 'done';
       t.flash = 1;
+      // 정답 타일은 별빛과 함께 원래대로 복구된다 —
+      // 소모성 재질이라도 정답 진행이 막히는 일이 없도록.
+      SK.Tiles.reset(t);
       SK.Particles.solveMark(t.i, t.j);
       SK.Particles.stars(t.i, t.j, 26);
       SK.Particles.ring(t.i, t.j, { size: 105, life: 0.45, width: 4, color: 'rgba(142,240,192,' });
@@ -800,6 +1157,8 @@ SK.Game = (function () {
       }
     }
 
+    if (holeAim.a > 0.01) drawHoleAim(ctx, holeAim);
+
     SK.Particles.draw(ctx, SK.Iso);
     ctx.restore();
 
@@ -831,6 +1190,7 @@ SK.Game = (function () {
     boot: boot,
     startWith: startWith,
     setSubject: setSubject,
+    setDiag: setDiag, isDiag: isDiag,
     skip: skip,
     relayout: resize,
     getScore: function () { return score; },
@@ -845,9 +1205,7 @@ SK.Game = (function () {
           expected: fsm && fsm.expected(),
           progress: fsm ? fsm.progress.slice() : [],
           grid: GRID, spacing: SPACING, scale: scale,
-          player: { ci: player.ci, cj: player.cj, z: player.z, surface: player.surface, falling: player.falling },
-          score: score,
-          gaps: tiles.filter(function (t) { return t.gap; }).map(function (t) { return { i: t.i, j: t.j }; }),
+          player: { ci: player.ci, cj: player.cj, z: player.z, surface: player.surface },
           tiles: quizTiles.map(function (t) {
             return {
               i: t.i, j: t.j, label: t.label, correct: t.correct, order: t.order,
@@ -865,10 +1223,35 @@ SK.Game = (function () {
         land(power > 1 ? 1 : 0.5, power || 1, i, j);
         return fsm.progress.slice();
       },
-      press: function (dx, dy, jump) { input.dx = dx; input.dy = dy; if (jump) input.jump = true; },
+      press: function (dx, dy, jump) { input.dx = dx; input.dy = dy; if (jump) requestJump(); },
       release: function () { input.dx = 0; input.dy = 0; },
       safeRect: safeRect,
       /** 지금 조준 표시가 켜진 타일 수 (0 또는 1) */
+      /** 임의의 칸 재질 읽기/바꾸기 — 특정 재질의 연출을 확인할 때 쓴다 */
+      matOf: function (i, j) { var t = getTile(i, j); return t && t.mat; },
+      setMat: function (i, j, mat) {
+        var t = getTile(i, j);
+        if (t) { t.mat = mat; SK.Tiles.reset(t); }
+        return t && t.mat;
+      },
+      input: function () {
+        var held = [], buf = [], tnow = performance.now();
+        for (var c in KEYDIR) if (input.keys[c]) held.push(c);
+        var tapAlive = tnow - lastDirAt < TAP_HOLD_MS;
+        if (tapAlive && tapX.code) buf.push('x:' + tapX.code);
+        if (tapAlive && tapY.code) buf.push('y:' + tapY.code);
+        var d = player && player.aimDir;
+        return {
+          dx: input.dx, dy: input.dy, jumpPending: jumpPending(),
+          jumpAgo: Math.round(performance.now() - input.jumpAt), jumpHeld: input.jumpHeld,
+          held: held, buffered: buf,
+          aimDir: d ? (d.di + ',' + d.dj) : null,
+          aimHold: player ? Math.round((player.aimHold || 0) * 1000) : 0,
+          hopping: player ? player.hopping : null,
+          cooldown: player ? +(player.cooldown || 0).toFixed(3) : null
+        };
+      },
+      keyLog: function (on) { keyLog = on !== false; return keyLog ? '켬 — 키를 눌러 보세요' : '끔'; },
       aimCount: function () {
         var n = 0;
         for (var k = 0; k < tiles.length; k++) if (tiles[k].aim > 0.5) n++;

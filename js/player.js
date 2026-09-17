@@ -16,7 +16,10 @@ SK.Player = (function () {
   var HOP_H = 0.62;          // 보통 도약 높이(격자 z 단위)
   var HOP_POWER_H = 1.25;
   var COOLDOWN = 0.05;       // 착지 후 다음 도약까지
-  var FALL_DUR = 0.55;       // 빈칸으로 떨어졌다가 되돌아오기까지
+  /* 방향 키를 뗀 뒤 조준이 남아 있는 시간(초).
+     Game 쪽 COMBINE_MS(0.26초)가 이미 방향 입력을 붙들고 있으므로, 둘을 더한
+     0.44초가 실제 유지 시간이다. 더 늘리면 제자리 내려찍기가 불편해진다. */
+  var AIM_HOLD = 0.18;
 
   /** 화면 8방향 → 격자 이웃 오프셋 */
   var DIRS = [
@@ -30,13 +33,54 @@ SK.Player = (function () {
     { dx: -1, dy: -1, di: -1, dj: 0 }   // ↖
   ];
 
-  /** 아날로그 입력(dx,dy)을 8방향 중 하나로 양자화 */
-  function quantize(dx, dy) {
-    if (dx === 0 && dy === 0) return null;
-    var ang = Math.atan2(dy, dx);                 // -π..π, 화면 기준
-    var idx = Math.round((ang + Math.PI / 2) / (Math.PI / 4));
-    idx = ((idx % 8) + 8) % 8;
-    return DIRS[idx];
+  /* 각 방향의 **실제 화면 각도**.
+   *
+   *  아이소메트릭에서 이웃 타일은 화면상 45°씩 놓여 있지 않다. 타일이 2:1 다이아몬드
+   *  (TW 116 × TH 58)이므로 이웃 여덟 칸은
+   *
+   *        -90° · -26.6° · 0° · +26.6° · +90° · +153.4° · 180° · -153.4°
+   *
+   *  에 있다. 예전 quantize() 는 이걸 균등한 45° 부채꼴로 나눠서, 화면에서 26.6°
+   *  위에 보이는 타일을 조준하려면 스틱을 45°로 밀어야 했다 — **최대 18.4° 어긋남**.
+   *  게다가 위·아래 방향은 63°짜리 넓은 구역을, 얕은 대각선은 26°짜리 좁은 구역을
+   *  받아서 "위는 잘 되는데 대각선이 안 잡힌다"가 됐다.
+   *
+   *  이제는 실제 화면 벡터와의 내적이 가장 큰 방향을 고른다. 스틱이 가리키는 쪽에
+   *  보이는 타일이 그대로 잡힌다.
+   */
+  var DIR_SCREEN = null;
+
+  function screenDirs() {
+    if (DIR_SCREEN) return DIR_SCREEN;
+    var I = window.SK && SK.Iso;
+    var tw = I ? I.TW : 116, th = I ? I.TH : 58;
+    DIR_SCREEN = DIRS.map(function (d) {
+      var x = (d.di - d.dj) * (tw / 2);
+      var y = (d.di + d.dj) * (th / 2);
+      var n = Math.hypot(x, y) || 1;
+      return { x: x / n, y: y / n };
+    });
+    return DIR_SCREEN;
+  }
+
+  // 경계에서 방향이 파르르 떨리지 않도록, 이미 잡고 있던 방향에 주는 가산점
+  var STICKY = 0.05;
+
+  /**
+   * 아날로그 입력(dx,dy)을 8방향 중 하나로 양자화.
+   * @param {object} prev 직전 방향 — 있으면 히스테리시스가 걸린다
+   */
+  function quantize(dx, dy, prev) {
+    var len = Math.hypot(dx, dy);
+    if (len < 1e-6) return null;
+    var ux = dx / len, uy = dy / len;
+    var S = screenDirs(), best = -2, bi = 0;
+    for (var k = 0; k < S.length; k++) {
+      var dot = ux * S[k].x + uy * S[k].y;
+      if (prev === DIRS[k]) dot += STICKY;
+      if (dot > best) { best = dot; bi = k; }
+    }
+    return DIRS[bi];
   }
 
   function create(ci, cj) {
@@ -45,15 +89,13 @@ SK.Player = (function () {
       fromI: ci, fromJ: cj,
       x: ci, y: cj, z: 0,      // 렌더용 연속 좌표
       hopping: false,
-      falling: false,          // 빈칸으로 추락 중
-      fallT: 0,
-      backI: ci, backJ: cj,    // 추락 뒤 돌아갈 칸
       hopT: 0, hopDur: HOP_DUR, hopH: HOP_H,
       power: 1,                // 1=보통, 2=강한 점프
       cooldown: 0,
       chain: 0,                // 연속 도약 수 (강도 보너스)
       chainTimer: 0,
       aimDir: null,            // 현재 조준 중인 방향(목표 타일 표시에 사용)
+      aimHold: 0,              // 방향 키를 뗀 뒤 조준이 남아 있는 시간
       facing: 1,
       squash: 0,
       stunTimer: 0,
@@ -75,8 +117,6 @@ SK.Player = (function () {
   function update(p, input, dt, world, ev) {
     p.justLanded = false;
 
-    if (p.falling) { advanceFall(p, dt, world); return; }
-
     if (p.stunTimer > 0) {
       p.stunTimer -= dt;
       input = { dx: 0, dy: 0, jump: false };
@@ -90,8 +130,27 @@ SK.Player = (function () {
       if (p.chainTimer <= 0) p.chain = 0;
     }
 
-    // 조준 방향은 점프 여부와 상관없이 항상 갱신한다(목표 타일 표시용)
-    p.aimDir = quantize(input.dx, input.dy);
+    /* 조준 방향은 점프 여부와 상관없이 항상 갱신한다(목표 타일 표시용).
+     *
+     *  방향 키를 떼도 AIM_HOLD 동안은 조준이 살아 있다. **세 키를 동시에 누르지
+     *  않아도 되게** 하려는 것이다 — 대각선 + 점프는 `↑`+`←`+`Space` 로 3키 동시
+     *  입력인데, 값싼 키보드는 이 조합에서 한 키를 통째로 삼킨다(방향키 묶음에서
+     *  특히 자주 일어난다). 조준이 잠깐 남아 있으면 **방향을 잡았다 떼고 점프**해도
+     *  되므로 한 번에 두 키면 충분해진다.
+     *
+     *  제자리 내려찍기(방향 없이 점프)와 헷갈리지 않는다 — 조준 표시가 켜져 있으면
+     *  그 칸으로 뛰고, 꺼져 있으면 내려찍기다. 화면에 보이는 그대로다.
+     */
+    var aim = quantize(input.dx, input.dy, p.aimDir);
+    if (aim) {
+      p.aimDir = aim;
+      p.aimHold = AIM_HOLD;
+    } else if (p.aimHold > 0) {
+      p.aimHold = Math.max(0, p.aimHold - dt);
+      if (p.aimHold === 0) p.aimDir = null;
+    } else {
+      p.aimDir = null;
+    }
 
     if (p.hopping) {
       advanceHop(p, dt, world, ev);
@@ -167,35 +226,7 @@ SK.Player = (function () {
     p.squash = -0.22 * Math.sin(Math.PI * t) * (p.power > 1 ? 1.3 : 1);
   }
 
-  function stun(p, sec) { p.stunTimer = sec; p.chain = 0; }
-
-  /** 빈칸을 디뎠다 — 아래로 떨어졌다가 (backI, backJ) 칸에서 다시 나타난다 */
-  function fall(p, backI, backJ) {
-    p.falling = true;
-    p.fallT = 0;
-    p.hopping = false;
-    p.backI = backI; p.backJ = backJ;
-    p.chain = 0; p.chainTimer = 0;
-    p.squash = -0.35;
-  }
-
-  function advanceFall(p, dt, world) {
-    p.fallT += dt / FALL_DUR;
-    if (p.fallT < 1) {
-      p.z = -p.fallT * p.fallT * 3.4;     // 가속하며 떨어진다
-      p.squash = -0.3;
-      return;
-    }
-    p.falling = false;
-    p.fallT = 0;
-    p.ci = p.backI; p.cj = p.backJ;
-    p.x = p.ci; p.y = p.cj; p.z = 0;
-    p.surface = world.surfaceOf(p.ci, p.cj);
-    p.surfaceTarget = p.surface;
-    p.squash = 0.4;
-    p.cooldown = 0.2;
-    p.stunTimer = 0.3;
-  }
+  function stun(p, sec) { p.stunTimer = sec; p.chain = 0; p.aimHold = 0; p.aimDir = null; }
 
   /* ---------- 렌더 ---------- */
 
@@ -206,18 +237,16 @@ SK.Player = (function () {
   function draw(ctx, p, now, sx, sy, zpx) {
     var Iso = SK.Iso;
 
-    // --- 그림자: 항상 발밑 타일 윗면에 붙는다 (빈칸으로 떨어질 때는 받칠 바닥이 없다) ---
+    // --- 그림자: 항상 발밑 타일 윗면에 붙는다 ---
     var shadowY = sy - p.surface;
     var shrink = 1 / (1 + (zpx / (Iso.TZ * 2)) * 0.9);
-    if (!p.falling) {
-      ctx.save();
-      ctx.globalAlpha = 0.34 * shrink;
-      ctx.fillStyle = '#000';
-      ctx.beginPath();
-      ctx.ellipse(sx, shadowY, 26 * shrink, 13 * shrink, 0, 0, 6.2832);
-      ctx.fill();
-      ctx.restore();
-    }
+    ctx.save();
+    ctx.globalAlpha = 0.34 * shrink;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(sx, shadowY, 26 * shrink, 13 * shrink, 0, 0, 6.2832);
+    ctx.fill();
+    ctx.restore();
 
     var sq = p.squash;
     var w = 27 * (1 + sq * 0.5);
@@ -229,7 +258,7 @@ SK.Player = (function () {
 
     // --- 소리 오라: 출력 레벨에 맞춰 맥동하는 링 (소리 ↔ 시각 연결) ---
     var level = SK.Audio.getLevel ? SK.Audio.getLevel() : 0;
-    if (level > 0.02 && !p.falling) {
+    if (level > 0.02) {
       ctx.save();
       ctx.translate(sx, shadowY);
       ctx.scale(1, Iso.TH / Iso.TW);
@@ -294,7 +323,7 @@ SK.Player = (function () {
   }
 
   return {
-    create: create, update: update, draw: draw, stun: stun, fall: fall,
+    create: create, update: update, draw: draw, stun: stun,
     quantize: quantize, DIRS: DIRS
   };
 })();

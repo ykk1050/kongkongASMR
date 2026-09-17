@@ -27,8 +27,6 @@ SK.Tiles = (function () {
   /* ---------- 재질 정의 ----------
    * durability: 완전히 부서지기까지 필요한 밟기 횟수 (0 = 안 부서짐)
    * sound:      메뉴의 '소리 도감'에 표시할 의성어
-   *
-   * 한번 부서진 타일은 되살아나지 않는다 — 발자국이 남는 산책이어야 한다.
    */
   var MATERIALS = {
     keycap: {
@@ -47,12 +45,12 @@ SK.Tiles = (function () {
       ink: '#093221', glow: '#8ef0c0', thick: 1.15, squish: 1.3, art: 'jelly'
     },
     leaf: {
-      label: '낙엽', sound: '바스락', klass: 'consumable', durability: 4,
+      label: '낙엽', sound: '바스락', klass: 'consumable', durability: 2, regen: 2.2,
       top: '#c9a273', topDark: '#a37c4d', side: '#8a6740', side2: '#6d5133',
       ink: '#33200a', glow: '#ffb267', thick: 0.62, squish: 0.35, art: 'leaf'
     },
     bubble: {
-      label: '에어캡', sound: '뽁', klass: 'consumable', durability: 4,
+      label: '에어캡', sound: '뽁', klass: 'consumable', durability: 3, regen: 1.8,
       top: '#dff4ff', topDark: '#a9ddf5', side: '#7fbfe0', side2: '#5b9ec2',
       ink: '#123a52', glow: '#a8e8ff', thick: 0.8, squish: 0.5, art: 'bubble'
     },
@@ -69,12 +67,12 @@ SK.Tiles = (function () {
       ink: '#2a1656', glow: '#d9c4ff', thick: 0.9, squish: 1.45, art: 'slime'
     },
     orbeez: {
-      label: '구슬볼', sound: '톡톡', klass: 'consumable', durability: 4,
+      label: '구슬볼', sound: '톡톡', klass: 'consumable', durability: 3, regen: 1.9,
       top: '#ffe0ef', topDark: '#f2a8cb', side: '#d98cb0', side2: '#b56f92',
       ink: '#4a1030', glow: '#ffd0e6', thick: 0.85, squish: 0.9, art: 'orbeez'
     },
     sand: {
-      label: '모래', sound: '사각', klass: 'consumable', durability: 4,
+      label: '모래', sound: '사각', klass: 'consumable', durability: 2, regen: 2.0,
       top: '#f5ead0', topDark: '#d9c9a4', side: '#b9a77f', side2: '#978764',
       ink: '#3d2f12', glow: '#ffeec2', thick: 0.55, squish: 0.6, art: 'sand'
     },
@@ -84,7 +82,7 @@ SK.Tiles = (function () {
       ink: '#0d3446', glow: '#e8faff', thick: 1.0, squish: 0.35, art: 'glass'
     },
     snow: {
-      label: '눈', sound: '뽀득', klass: 'consumable', durability: 4,
+      label: '눈', sound: '뽀득', klass: 'consumable', durability: 2, regen: 2.4,
       top: '#ffffff', topDark: '#d7e6f5', side: '#b9cde0', side2: '#9bb0c6',
       ink: '#274055', glow: '#ffffff', thick: 0.7, squish: 0.75, art: 'snow'
     },
@@ -92,40 +90,13 @@ SK.Tiles = (function () {
       label: '스펀지', sound: '뽀드득', klass: 'elastic', durability: 0,
       top: '#ffc95e', topDark: '#e09a2c', side: '#c07f1f', side2: '#9a6516',
       ink: '#4a3306', glow: '#fff0bd', thick: 0.95, squish: 1.15, art: 'sponge'
-    },
-
-    /* ---- 확장 재질 2 ---- */
-    water: {
-      label: '물웅덩이', sound: '찰방', klass: 'elastic', durability: 0,
-      top: '#bdefff', topDark: '#69c6ea', side: '#4aa4cd', side2: '#3a85aa',
-      ink: '#06344a', glow: '#dff7ff', thick: 0.45, squish: 1.35, art: 'water'
-    },
-    gravel: {
-      label: '자갈', sound: '자그락', klass: 'elastic', durability: 0,
-      top: '#ccd0d8', topDark: '#9ba1ad', side: '#848a97', side2: '#686e7a',
-      ink: '#23262e', glow: '#e4e7ee', thick: 0.8, squish: 0.28, art: 'gravel'
-    },
-    moss: {
-      label: '이끼', sound: '폭신', klass: 'elastic', durability: 0,
-      top: '#a8d96a', topDark: '#6da53c', side: '#59882f', side2: '#456b23',
-      ink: '#1d3208', glow: '#d2f59a', thick: 0.85, squish: 1.0, art: 'moss'
-    },
-    foam: {
-      label: '스티로폼', sound: '끼익', klass: 'elastic', durability: 0,
-      top: '#fbfbf2', topDark: '#dcdcc9', side: '#c3c3b0', side2: '#a1a18f',
-      ink: '#3c3c2a', glow: '#ffffff', thick: 1.0, squish: 0.55, art: 'foam'
-    },
-    paper: {
-      label: '종이', sound: '구깃', klass: 'consumable', durability: 4,
-      top: '#fdf6e6', topDark: '#e4d6b6', side: '#c8b894', side2: '#a4956f',
-      ink: '#4a3a16', glow: '#fff4d2', thick: 0.5, squish: 0.45, art: 'paper'
-    },
-    ice: {
-      label: '얼음', sound: '쩌억', klass: 'consumable', durability: 4,
-      top: '#e4f8ff', topDark: '#9fd8ef', side: '#79b9d6', side2: '#5b96b4',
-      ink: '#0a3a50', glow: '#eafcff', thick: 0.9, squish: 0.18, art: 'ice'
     }
   };
+
+  /* 에어캡 알의 배치 — 타일 그림과 파티클이 **같은 자리**를 써야 한다.
+     따로 두면 터지는 연출이 알에서 몇 픽셀 빗나가 붕 뜬다. */
+  var BUBBLE_CELLS = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+  var BUBBLE_PER_STEP = 2;          // 한 번 밟을 때 터지는 알 수
 
   function material(key) { return MATERIALS[key] || MATERIALS.wood; }
   function isConsumable(key) { return material(key).klass === 'consumable'; }
@@ -135,7 +106,6 @@ SK.Tiles = (function () {
     return {
       i: i, j: j,
       mat: mat || 'wood',
-      gap: false,         // 발판이 없는 빈칸 — 디디면 아래로 떨어진다
       label: null,        // 표면에 그릴 한 글자
       role: 'plain',      // 'plain' | 'seq'
       payload: null,
@@ -145,8 +115,10 @@ SK.Tiles = (function () {
       press: 0,
       pressVel: 0,
       damage: 0,          // 소모성 균열 단계
-      broken: 0,          // 0..1 완전히 부서진 정도 (되돌아오지 않는다)
+      broken: 0,          // 0..1 완전히 부서진 정도
+      regenAt: 0,
       wobble: 0,
+      hi: 0,              // 다음 순서 강조
       aim: 0,             // 점프 목표 지점 표시
       flash: 0,           // 소리와 동기화된 표면 발광
       mark: 0,            // 밟은 자국(발자국·눌린 흔적) 0~1
@@ -164,7 +136,7 @@ SK.Tiles = (function () {
    * @returns {{sound:string, stage:number, total:number, gain:number}}
    *   sound: 'step' | 'crack' | 'shatter' | 'hollow'
    */
-  function stomp(t, intensity, power) {
+  function stomp(t, intensity, now, power) {
     var m = material(t.mat);
     t.flash = 1;
     t.wobble = 1;
@@ -177,20 +149,25 @@ SK.Tiles = (function () {
     if (m.klass === 'consumable') {
       if (t.broken >= 1) return { sound: 'hollow', stage: 0, total: m.durability, gain: 0.3 };
 
-      // 세게 내려찍어도 한 번은 한 단계 — durability 번째로 밟을 때 부서진다
-      t.damage = Math.min(m.durability, t.damage + 1);
+      var wasPopped = t.damage * BUBBLE_PER_STEP;      // 에어캡: 지금까지 터진 알 수
+      t.damage = Math.min(m.durability, t.damage + (power || 1));
       t.press = Math.min(1, t.press + 0.35);
       t.pressVel = -4 * (0.5 + intensity);
       buildCracks(t);
 
-      t.tilt = (t.damage / m.durability) * 0.06 * (Math.random() < 0.5 ? -1 : 1);
+      // 에어캡은 시트가 기울지 않는다 — 알만 꺼질 뿐
+      t.tilt = t.mat === 'bubble'
+        ? 0
+        : (t.damage / m.durability) * 0.06 * (Math.random() < 0.5 ? -1 : 1);
 
       if (t.damage >= m.durability) {
         t.broken = 1;
+        t.regenAt = now + m.regen;
         SK.Particles.shatter(t.i, t.j, t.mat, intensity);
         return { sound: 'shatter', stage: m.durability, total: m.durability, gain: 1 };
       }
-      SK.Particles.crackBits(t.i, t.j, t.mat, t.damage / m.durability);
+      SK.Particles.crackBits(t.i, t.j, t.mat, t.damage / m.durability,
+        wasPopped, Math.min(BUBBLE_CELLS.length, t.damage * BUBBLE_PER_STEP));
       return { sound: 'crack', stage: t.damage, total: m.durability, gain: 0.8 };
     }
 
@@ -201,6 +178,8 @@ SK.Tiles = (function () {
 
   /** 균열 선을 미리 만들어 매 프레임 흔들리지 않게 고정 */
   function buildCracks(t) {
+    // 에어캡에는 금이 가지 않는다 — 알이 터질 뿐이다
+    if (t.mat === 'bubble') { t.cracks = null; return; }
     var n = t.damage * 3, lines = [];
     for (var k = 0; k < n; k++) {
       var a = t.seed + k * 1.9;
@@ -214,7 +193,7 @@ SK.Tiles = (function () {
     t.cracks = lines;
   }
 
-  function update(t, dt) {
+  function update(t, dt, now) {
     if (t.press !== 0 || t.pressVel !== 0) {
       var k = 165, damp = 15;
       t.pressVel += (-k * t.press - damp * t.pressVel) * dt;
@@ -224,33 +203,42 @@ SK.Tiles = (function () {
     if (t.wobble > 0) t.wobble = Math.max(0, t.wobble - dt * 2.2);
     if (t.flash > 0) t.flash = Math.max(0, t.flash - dt * 3.4);
     if (t.mark > 0) t.mark = Math.max(0, t.mark - dt * 0.75);
+    if (t.broken > 0 && now >= t.regenAt) {
+      t.broken = Math.max(0, t.broken - dt * 1.6);
+      if (t.broken === 0) { t.damage = 0; t.cracks = null; t.tilt = 0; }
+    }
   }
 
   /* ---------- 높이 질의 ---------- */
   function thicknessOf(t) { return Iso.TZ * material(t.mat).thick; }
 
   function surfaceOffset(t) {
-    if (!t || t.gap) return 0;
+    if (!t) return 0;
     var m = material(t.mat);
     var thick = Iso.TZ * m.thick;
     var sink = t.press * Iso.TZ * 0.75 * m.squish + t.broken * thick * 0.9;
     return Math.max(0, thick - sink);
   }
 
-  function isSolid(t) { return !!t && !t.gap && t.broken < 0.85; }
+  function isSolid(t) { return !!t && t.broken < 0.85; }
+
+  /** 새 문제를 배치할 때 타일을 말끔한 상태로 되돌린다 */
+  function reset(t) {
+    t.damage = 0; t.broken = 0; t.cracks = null;
+    t.mark = 0; t.tilt = 0; t.press = 0; t.pressVel = 0;
+  }
 
   /* =========================================================
    *  렌더
    * ======================================================= */
   function draw(ctx, t, now, sx, sy) {
-    if (t.gap) { drawGap(ctx, sx, sy); if (t.aim > 0) drawAim(ctx, t, sx, sy, now); return; }
-
     var m = material(t.mat);
     var thick = Iso.TZ * m.thick;
     var sink = t.press * Iso.TZ * 0.75 * m.squish + t.broken * thick * 0.9;
     var topY = sy - thick + sink;
     var hw = Iso.TW / 2, hh = Iso.TH / 2;
-    var alpha = 1 - t.broken * 0.72;
+    // 에어캡은 '없어지는' 게 아니라 알만 꺼진 채 시트가 남으므로 덜 흐려진다
+    var alpha = 1 - t.broken * (t.mat === 'bubble' ? 0.18 : 0.72);
 
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -348,6 +336,12 @@ SK.Tiles = (function () {
     } else if (t.state === 'wrong') {
       ctx.strokeStyle = 'rgba(255,154,168,.95)'; ctx.lineWidth = 3;
       diamond(ctx, sx, topY, 0.94, 0.94); ctx.stroke();
+    }
+    if (t.hi > 0) {
+      var pulse = 0.35 + 0.3 * Math.sin(now * 5 + t.seed);
+      ctx.strokeStyle = 'rgba(255,214,107,' + (t.hi * (0.55 + pulse)) + ')';
+      ctx.lineWidth = 3;
+      diamond(ctx, sx, topY, 0.88, 0.88); ctx.stroke();
     }
 
     // 점프 목표 표시
@@ -509,8 +503,7 @@ SK.Tiles = (function () {
 
     /* 낙엽: 잎사귀가 실제로 얹혀 있다 */
     leaf: function (ctx, t, m, cx, cy, hw, hh) {
-      // 부서지기 직전까지 잎이 한 장은 남도록 내구도에 맞춰 줄인다
-      var leaves = Math.max(1, Math.ceil(4 * (1 - t.damage / m.durability)));
+      var leaves = Math.max(1, 4 - t.damage);
       var tone = ['#e28a33', '#bd5a20', '#d8a341', '#a4462a'];
       var spots = [[-0.4, -0.02, 0.45], [0.34, -0.26, -0.75],
                    [0.12, 0.32, 0.25], [-0.1, -0.36, 2.2]];
@@ -558,8 +551,8 @@ SK.Tiles = (function () {
       ctx.fillStyle = 'rgba(255,255,255,.18)';
       diamond(ctx, cx, cy, 0.88, 0.88); ctx.fill();
 
-      var cells = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
-      var popped = Math.round(cells.length * t.damage / m.durability);
+      var cells = BUBBLE_CELLS;
+      var popped = t.damage * BUBBLE_PER_STEP;
       for (var k = 0; k < cells.length; k++) {
         var bx = cx + (cells[k][0] - cells[k][1]) * hw * 0.3;
         var by = cy + (cells[k][0] + cells[k][1]) * hh * 0.3;
@@ -676,7 +669,7 @@ SK.Tiles = (function () {
     orbeez: function (ctx, t, m, cx, cy, hw, hh) {
       var hues = [340, 20, 290, 200, 130, 355, 45];
       var total = 9;
-      var gone = Math.round(total * t.damage / m.durability);
+      var gone = t.damage * 3;
       ctx.save();
       for (var k = 0; k < total; k++) {
         if (k < gone) {
@@ -708,31 +701,98 @@ SK.Tiles = (function () {
     /* 모래: 알갱이 결 + 바람에 쓸린 줄무늬 */
     sand: function (ctx, t, m, cx, cy, hw, hh) {
       ctx.save();
-      // 바람에 쓸린 잔물결. 직선으로 그으면 곧바로 나뭇결이 된다
-      ctx.strokeStyle = 'rgba(146,116,66,.26)'; ctx.lineWidth = 1.5;
-      for (var k = 0; k < 4; k++) {
-        var rr = 0.2 + k * 0.19;
-        ctx.beginPath();
-        ctx.ellipse(cx - hw * 0.08, cy + hh * 0.06, hw * rr, hh * rr * 0.95,
-          0, 0.55 + k * 0.1, 2.95 + k * 0.1);
-        ctx.stroke();
+      diamond(ctx, cx, cy, 0.99, 0.99); ctx.clip();
+
+      // 1) 얼룩 — 고운 모래는 결코 한 가지 색이 아니다. 그라디언트 위에 큰 색 덩어리를
+      //    몇 개 얹어야 '칠한 면'이 아니라 '쌓인 가루'로 읽힌다.
+      for (var b = 0; b < 6; b++) {
+        var ba = t.seed * 1.7 + b * 2.399;
+        var br = 0.18 + rnd1(t.seed, b) * 0.42;
+        var bx = cx + Math.cos(ba) * hw * 0.42, by = cy + Math.sin(ba) * hh * 0.42;
+        var bg = ctx.createRadialGradient(bx, by, 1, bx, by, hw * br);
+        var warm = b % 2 === 0;
+        bg.addColorStop(0, warm ? 'rgba(255,246,216,.30)' : 'rgba(176,152,106,.24)');
+        bg.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = bg;
+        ctx.beginPath(); ctx.ellipse(bx, by, hw * br, hh * br, 0, 0, 6.2832); ctx.fill();
       }
-      // 알갱이 — 크기를 섞어야 가루로 보인다
-      for (var p = 0; p < 84; p++) {
+
+      // 2) 바람에 쓸린 잔물결 — 타일 바닥면(다이아몬드) 위에 눕혀서 그린다.
+      //    화면 좌표에 그대로 그으면 바닥이 아니라 공중에 뜬 무늬로 보인다.
+      //    마루 결과 달라 보이려면 능선이 조금씩 휘고 끊겨야 한다.
+      //    (Iso.pushSurface 와 같은 행렬이지만 hw/hh 를 직접 써서 소리 도감 아이콘처럼
+      //     타일 크기가 다른 곳에서도 그대로 맞는다)
+      ctx.save();
+      ctx.transform(hw, hh, -hw, hh, cx, cy);
+      ctx.lineCap = 'round';
+      for (var r = 0; r < 7; r++) {
+        var v = -0.42 + r * 0.14 + (rnd1(t.seed, r + 20) - 0.5) * 0.04;
+        var amp = 0.03 + rnd1(t.seed, r + 40) * 0.05;
+        var ph = t.seed + r * 1.3;
+        // 능선은 끊어져야 한다. 한 줄로 쭉 이으면 그 순간 마루 널판(나뭇결)이 된다.
+        var gapAt = 0.2 + rnd1(t.seed, r + 80) * 0.5;
+        ctx.beginPath();
+        var pen = false;
+        for (var s = 0; s <= 16; s++) {
+          var u = -0.5 + s / 16;
+          var yy = v + Math.sin(u * 7 + ph) * amp + Math.sin(u * 19 + ph * 2) * amp * 0.3;
+          var on = Math.abs((s / 16) - gapAt) > 0.09;
+          if (!on) { pen = false; continue; }
+          if (!pen) { ctx.moveTo(u, yy); pen = true; } else ctx.lineTo(u, yy);
+        }
+        // 능선은 위쪽이 빛을 받고 아래쪽에 그늘이 진다 — 두 줄이 붙어 있어야 입체가 된다
+        ctx.strokeStyle = 'rgba(255,250,230,.42)'; ctx.lineWidth = 0.016;
+        ctx.stroke();
+        ctx.translate(0, 0.018);
+        ctx.strokeStyle = 'rgba(128,99,52,.34)'; ctx.lineWidth = 0.014;
+        ctx.stroke();
+        ctx.translate(0, -0.018);
+      }
+      ctx.restore();                                  // pushSurface 해제 (클립은 유지)
+
+      // 3) 알갱이 — 밝은 것/중간/어두운 것 세 톤을 섞어야 가루로 보인다
+      var TONE = ['rgba(255,252,236,.95)', 'rgba(214,190,146,.7)', 'rgba(124,96,50,.45)'];
+      for (var p = 0; p < 110; p++) {
         var a = t.seed * 2.3 + p * 2.399;
-        var rad = Math.sqrt((p % 17) / 17) * 0.78;
+        var rad = Math.sqrt((p % 23) / 23) * 0.84;
         var gx = cx + Math.cos(a) * hw * rad;
         var gy = cy + Math.sin(a) * hh * rad;
-        var big = (p % 11 === 0);
-        ctx.fillStyle = (p % 3 === 0) ? 'rgba(255,250,228,.9)' : 'rgba(132,102,54,.42)';
+        ctx.fillStyle = TONE[p % 3];
         ctx.beginPath();
-        ctx.arc(gx, gy, big ? 1.9 : 1.05, 0, 6.2832);
+        ctx.arc(gx, gy, 0.8 + rnd1(t.seed, p) * 1.1, 0, 6.2832);
         ctx.fill();
       }
-      // 눌린 자국(밟을수록 깊어짐)
+      // 굵은 알갱이 몇 알은 그림자를 달아 준다 — 표면 위에 '놓여 있게' 만드는 장치
+      for (var q = 0; q < 7; q++) {
+        var qa = t.seed * 0.9 + q * 2.1;
+        var qr = 0.2 + rnd1(t.seed, q + 60) * 0.55;
+        var qx = cx + Math.cos(qa) * hw * qr, qy = cy + Math.sin(qa) * hh * qr;
+        var rr2 = 1.7 + rnd1(t.seed, q + 70) * 1.1;
+        ctx.fillStyle = 'rgba(108,84,44,.4)';
+        ctx.beginPath(); ctx.ellipse(qx + 1, qy + 0.9, rr2, rr2 * 0.6, 0, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = 'rgba(250,240,212,.95)';
+        ctx.beginPath(); ctx.arc(qx, qy, rr2 * 0.8, 0, 6.2832); ctx.fill();
+      }
+
+      // 4) 가장자리로 갈수록 어두워진다 — 모래가 테두리에서 흘러내리는 느낌
+      var eg = ctx.createRadialGradient(cx, cy, hw * 0.3, cx, cy, hw);
+      eg.addColorStop(0, 'rgba(0,0,0,0)');
+      eg.addColorStop(1, 'rgba(92,70,34,.3)');
+      ctx.fillStyle = eg;
+      diamond(ctx, cx, cy, 0.99, 0.99); ctx.fill();
+
+      // 5) 밟힌 자국 — 눌린 웅덩이와 밀려 나온 둔덕
       if (t.damage > 0) {
-        ctx.fillStyle = 'rgba(110,88,45,' + (0.18 + t.damage * 0.12) + ')';
-        diamond(ctx, cx, cy, 0.5, 0.5); ctx.fill();
+        var dd = Math.min(1, t.damage / 2);
+        var pg = ctx.createRadialGradient(cx, cy - hh * 0.05, 1, cx, cy, hw * 0.46);
+        pg.addColorStop(0, 'rgba(96,74,36,' + (0.34 + dd * 0.2) + ')');
+        pg.addColorStop(0.75, 'rgba(128,102,58,' + (0.16 + dd * 0.12) + ')');
+        pg.addColorStop(1, 'rgba(255,250,232,0)');
+        ctx.fillStyle = pg;
+        ctx.beginPath(); ctx.ellipse(cx, cy, hw * 0.46, hh * 0.46, 0, 0, 6.2832); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,250,228,' + (0.3 + dd * 0.2) + ')';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.ellipse(cx, cy + hh * 0.05, hw * 0.5, hh * 0.46, 0, 0.2, 2.94); ctx.stroke();
       }
       ctx.restore();
     },
@@ -787,40 +847,91 @@ SK.Tiles = (function () {
     },
 
     /* 눈: 새하얀 결정 + 다져진 발자국 */
-    snow: function (ctx, t, m, cx, cy, hw, hh) {
+    snow: function (ctx, t, m, cx, cy, hw, hh, now) {
       ctx.save();
-      // 소복한 둔덕 — 아래에 푸른 그늘을 깔아야 덩어리로 읽힌다
-      var mounds = [[-0.3, 0.08, 0.46], [0.26, -0.16, 0.4], [0.02, 0.26, 0.36]];
+      diamond(ctx, cx, cy, 0.99, 0.99); ctx.clip();
+
+      // 1) 눈은 빛을 속으로 들여보냈다 다시 내보낸다(표면하 산란). 위쪽은 거의 순백,
+      //    아래쪽 그늘은 회색이 아니라 **푸른색**이어야 눈으로 읽힌다.
+      var bg = ctx.createLinearGradient(cx, cy - hh, cx, cy + hh);
+      bg.addColorStop(0, 'rgba(255,255,255,.95)');
+      bg.addColorStop(0.55, 'rgba(240,248,255,.5)');
+      bg.addColorStop(1, 'rgba(150,186,222,.55)');
+      ctx.fillStyle = bg;
+      diamond(ctx, cx, cy, 0.99, 0.99); ctx.fill();
+
+      // 2) 소복한 둔덕 — 푸른 그늘을 아래로 길게 깔아야 덩어리로 보인다
+      var mounds = [[-0.30, 0.10, 0.46], [0.27, -0.15, 0.40], [0.03, 0.27, 0.34],
+                    [-0.05, -0.30, 0.26]];
       for (var p = 0; p < mounds.length; p++) {
         var mx = cx + mounds[p][0] * hw, my = cy + mounds[p][1] * hh, mr = mounds[p][2];
-        ctx.fillStyle = 'rgba(150,182,214,.5)';
+        var sg = ctx.createRadialGradient(mx, my + hh * 0.12, 1, mx, my + hh * 0.12, hw * mr * 1.1);
+        sg.addColorStop(0, 'rgba(132,170,210,.5)');
+        sg.addColorStop(1, 'rgba(132,170,210,0)');
+        ctx.fillStyle = sg;
         ctx.beginPath();
-        ctx.ellipse(mx, my + hh * 0.09, hw * mr, hh * mr * 1.02, 0, 0, 6.2832);
+        ctx.ellipse(mx + hw * 0.02, my + hh * 0.12, hw * mr * 1.1, hh * mr * 1.1, 0, 0, 6.2832);
         ctx.fill();
-        var mg = ctx.createRadialGradient(mx - hw * mr * 0.3, my - hh * mr * 0.6, 1, mx, my, hw * mr);
+        // 눈 둔덕은 테두리가 또렷하면 '흰 공'이 된다. 가장자리를 투명으로 빼서
+        // 주변 눈에 녹아들게 해야 소복이 쌓인 덩어리로 읽힌다.
+        var mg = ctx.createRadialGradient(mx - hw * mr * 0.34, my - hh * mr * 0.7, 1,
+                                          mx, my, hw * mr);
         mg.addColorStop(0, 'rgba(255,255,255,1)');
-        mg.addColorStop(1, 'rgba(226,238,250,.95)');
+        mg.addColorStop(0.55, 'rgba(250,253,255,.92)');
+        mg.addColorStop(0.82, 'rgba(226,239,251,.55)');
+        mg.addColorStop(1, 'rgba(214,231,247,0)');
         ctx.fillStyle = mg;
         ctx.beginPath();
-        ctx.ellipse(mx, my, hw * mr, hh * mr, 0, 0, 6.2832);
+        ctx.ellipse(mx, my, hw * mr * 1.12, hh * mr * 1.12, 0, 0, 6.2832);
         ctx.fill();
-      }
-      // 반짝이는 결정 — 네 갈래 별
-      for (var k = 0; k < 7; k++) {
-        var a2 = t.seed * 1.7 + k * 0.897;
-        var rr = 0.2 + (k % 4) * 0.17;
-        var sx2 = cx + Math.cos(a2) * hw * rr, sy2 = cy + Math.sin(a2) * hh * rr;
-        var len = 3.4 + (k % 3);
-        ctx.strokeStyle = 'rgba(120,168,214,.85)'; ctx.lineWidth = 1.3; ctx.lineCap = 'round';
+        // 꼭대기의 림 라이트 — 윗면에만 아주 옅게. 윤곽선이 되면 안 된다.
+        ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 2.4;
         ctx.beginPath();
-        ctx.moveTo(sx2 - len, sy2); ctx.lineTo(sx2 + len, sy2);
-        ctx.moveTo(sx2, sy2 - len * 0.62); ctx.lineTo(sx2, sy2 + len * 0.62);
+        ctx.ellipse(mx, my - hh * mr * 0.12, hw * mr * 0.62, hh * mr * 0.55, 0, 3.6, 5.8);
         ctx.stroke();
       }
-      // 다져진 자국
+
+      // 3) 고운 결정 가루 — 별 몇 개보다 '작은 점 수십 개'가 눈처럼 보인다
+      for (var g = 0; g < 70; g++) {
+        var ga = t.seed * 2.1 + g * 2.399;
+        var gr = Math.sqrt((g % 19) / 19) * 0.86;
+        var gx = cx + Math.cos(ga) * hw * gr, gy = cy + Math.sin(ga) * hh * gr;
+        ctx.fillStyle = (g % 4 === 0) ? 'rgba(170,202,235,.55)' : 'rgba(255,255,255,.9)';
+        ctx.beginPath(); ctx.arc(gx, gy, 0.7 + rnd1(t.seed, g) * 0.9, 0, 6.2832); ctx.fill();
+      }
+
+      // 4) 반짝임 — 결정 하나하나가 각도에 따라 번쩍인다. 서로 다른 위상으로 천천히
+      //    깜빡이게 하면 정지 화면에서도 눈밭이 살아 있다.
+      for (var k = 0; k < 9; k++) {
+        var a2 = t.seed * 1.7 + k * 0.897;
+        var rr = 0.16 + (k % 5) * 0.15;
+        var sx2 = cx + Math.cos(a2) * hw * rr, sy2 = cy + Math.sin(a2) * hh * rr;
+        var tw = 0.35 + 0.65 * Math.max(0, Math.sin((now || 0) * 1.6 + t.seed + k * 2.2));
+        var len = (3.0 + (k % 3) * 1.4) * (0.6 + tw * 0.6);
+        ctx.globalAlpha = 0.25 + tw * 0.75;
+        ctx.strokeStyle = (k % 3 === 0) ? 'rgba(198,226,255,.95)' : 'rgba(255,255,255,.98)';
+        ctx.lineWidth = 1.2; ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(sx2 - len, sy2); ctx.lineTo(sx2 + len, sy2);
+        ctx.moveTo(sx2, sy2 - len * 0.6); ctx.lineTo(sx2, sy2 + len * 0.6);
+        ctx.stroke();
+        ctx.beginPath(); ctx.arc(sx2, sy2, 1.1, 0, 6.2832);
+        ctx.fillStyle = 'rgba(255,255,255,1)'; ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      // 5) 다져진 자국 — 눌린 바닥은 푸르게 가라앉고, 밀려난 눈이 흰 테두리로 솟는다
       if (t.damage > 0) {
-        ctx.fillStyle = 'rgba(140,175,210,' + (0.22 + t.damage * 0.14) + ')';
-        diamond(ctx, cx, cy, 0.46, 0.46); ctx.fill();
+        var dd = Math.min(1, t.damage / 2);
+        var pg = ctx.createRadialGradient(cx, cy - hh * 0.04, 1, cx, cy, hw * 0.44);
+        pg.addColorStop(0, 'rgba(118,158,200,' + (0.42 + dd * 0.22) + ')');
+        pg.addColorStop(0.72, 'rgba(160,194,228,' + (0.2 + dd * 0.14) + ')');
+        pg.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = pg;
+        ctx.beginPath(); ctx.ellipse(cx, cy, hw * 0.44, hh * 0.44, 0, 0, 6.2832); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,' + (0.55 + dd * 0.35) + ')';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.ellipse(cx, cy, hw * 0.47, hh * 0.47, 0, 0, 6.2832); ctx.stroke();
       }
       ctx.restore();
     },
@@ -842,162 +953,20 @@ SK.Tiles = (function () {
         ctx.beginPath(); ctx.ellipse(px, py - r * 0.16, r * 0.92, r * 0.62, 0, 3.3, 6.1); ctx.stroke();
       }
       ctx.restore();
-    },
-
-    /* 물웅덩이: 고인 물 + 끊임없이 번지는 잔물결 */
-    water: function (ctx, t, m, cx, cy, hw, hh, now) {
-      ctx.save();
-      // 가운데가 깊다 — 가장자리로 갈수록 얕고 밝아진다
-      var g = ctx.createRadialGradient(cx, cy, 2, cx, cy, hw * 0.9);
-      g.addColorStop(0, 'rgba(22,94,132,.55)');
-      g.addColorStop(1, 'rgba(158,228,250,.25)');
-      ctx.fillStyle = g;
-      diamond(ctx, cx, cy, 0.9, 0.9); ctx.fill();
-
-      // 가만히 있어도 물결이 번진다 — 정지 화면에서도 '물'로 읽히는 단서
-      for (var k = 0; k < 3; k++) {
-        var ph = ((now * 0.32 + t.seed * 0.15 + k * 0.34) % 1);
-        ctx.strokeStyle = 'rgba(255,255,255,' + (0.45 * (1 - ph)).toFixed(3) + ')';
-        ctx.lineWidth = 1.6;
-        diamond(ctx, cx, cy, 0.22 + ph * 0.64, 0.22 + ph * 0.64); ctx.stroke();
-      }
-
-      // 수면에 비친 빛
-      ctx.fillStyle = 'rgba(255,255,255,.62)';
-      ctx.beginPath();
-      ctx.ellipse(cx - hw * 0.28, cy - hh * 0.26, hw * 0.2, hh * 0.09, -0.35, 0, 6.2832);
-      ctx.fill();
-      ctx.restore();
-    },
-
-    /* 자갈: 모서리가 살아 있는 돌 — 둥글면 구슬이 된다 */
-    gravel: function (ctx, t, m, cx, cy, hw, hh) {
-      ctx.save();
-      var tone = ['#eceef3', '#c2c7d0', '#9aa0ac', '#d6dae1'];
-      for (var k = 0; k < 15; k++) {
-        var a = t.seed * 1.3 + k * 2.399;
-        var rad = Math.sqrt((k % 11) / 11) * 0.76;
-        var px = cx + Math.cos(a) * hw * rad, py = cy + Math.sin(a) * hh * rad;
-        var r = 3.6 + (k % 4) * 1.5;
-
-        ctx.fillStyle = 'rgba(38,42,52,.35)';
-        ctx.beginPath(); ctx.ellipse(px + 1.4, py + r * 0.42, r, r * 0.46, 0, 0, 6.2832); ctx.fill();
-
-        ctx.fillStyle = tone[k % tone.length];
-        ctx.beginPath();
-        for (var v = 0; v < 5; v++) {
-          var va = a + v * 1.2566, vr = r * (0.72 + ((k + v) % 3) * 0.17);
-          var vx = px + Math.cos(va) * vr, vy = py + Math.sin(va) * vr * 0.62;
-          if (v === 0) ctx.moveTo(vx, vy); else ctx.lineTo(vx, vy);
-        }
-        ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = 'rgba(58,64,76,.45)'; ctx.lineWidth = 0.9; ctx.stroke();
-      }
-      ctx.restore();
-    },
-
-    /* 이끼: 도톰한 덩어리 + 곤두선 잔털 */
-    moss: function (ctx, t, m, cx, cy, hw, hh) {
-      ctx.save();
-      for (var p = 0; p < 4; p++) {
-        var a = t.seed + p * 1.57;
-        var mx = cx + Math.cos(a) * hw * 0.3, my = cy + Math.sin(a) * hh * 0.3;
-        ctx.fillStyle = (p % 2) ? 'rgba(98,162,50,.9)' : 'rgba(126,190,68,.9)';
-        ctx.beginPath(); ctx.ellipse(mx, my, hw * 0.36, hh * 0.36, 0, 0, 6.2832); ctx.fill();
-      }
-      ctx.strokeStyle = 'rgba(196,238,132,.85)'; ctx.lineWidth = 1.2; ctx.lineCap = 'round';
-      for (var k = 0; k < 26; k++) {
-        var aa = t.seed * 2.1 + k * 2.399;
-        var rr = Math.sqrt((k % 9) / 9) * 0.74;
-        var gx = cx + Math.cos(aa) * hw * rr, gy = cy + Math.sin(aa) * hh * rr;
-        ctx.beginPath();
-        ctx.moveTo(gx, gy);
-        ctx.lineTo(gx + Math.cos(aa * 3) * 2, gy - 4 - (k % 3));
-        ctx.stroke();
-      }
-      // 이끼는 늘 젖어 있다 — 물방울 두 알
-      ctx.fillStyle = 'rgba(235,255,210,.75)';
-      ctx.beginPath(); ctx.ellipse(cx - hw * 0.2, cy + hh * 0.18, 2.6, 1.8, 0, 0, 6.2832); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(cx + hw * 0.26, cy - hh * 0.1, 2, 1.4, 0, 0, 6.2832); ctx.fill();
-      ctx.restore();
-    },
-
-    /* 스티로폼: 눌러 붙은 하얀 알갱이 */
-    foam: function (ctx, t, m, cx, cy, hw, hh) {
-      ctx.save();
-      for (var k = 0; k < 30; k++) {
-        var a = t.seed * 1.1 + k * 2.399;
-        var rad = Math.sqrt((k % 12) / 12) * 0.78;
-        var px = cx + Math.cos(a) * hw * rad, py = cy + Math.sin(a) * hh * rad;
-        var r = 3.6 + (k % 3) * 1.2;
-        ctx.fillStyle = 'rgba(255,255,255,.96)';
-        ctx.beginPath(); ctx.arc(px, py, r, 0, 6.2832); ctx.fill();
-        ctx.strokeStyle = 'rgba(150,150,128,.42)'; ctx.lineWidth = 0.9; ctx.stroke();
-      }
-      ctx.restore();
-    },
-
-    /* 종이: 어긋나게 겹친 낱장 + 밟을수록 늘어나는 구김 */
-    paper: function (ctx, t, m, cx, cy, hw, hh) {
-      ctx.save();
-      ctx.fillStyle = 'rgba(252,246,230,.95)';
-      ctx.save(); ctx.translate(-3.5, -2.5); diamond(ctx, cx, cy, 0.84, 0.84); ctx.fill(); ctx.restore();
-      ctx.fillStyle = 'rgba(255,255,250,.98)';
-      diamond(ctx, cx, cy, 0.8, 0.8); ctx.fill();
-      ctx.strokeStyle = 'rgba(150,132,90,.5)'; ctx.lineWidth = 1;
-      diamond(ctx, cx, cy, 0.8, 0.8); ctx.stroke();
-
-      var folds = 3 + t.damage * 2;
-      ctx.strokeStyle = 'rgba(146,124,76,.42)'; ctx.lineWidth = 1.1; ctx.lineCap = 'round';
-      for (var k = 0; k < folds; k++) {
-        var a = t.seed + k * 1.27;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(a) * hw * 0.6, cy + Math.sin(a) * hh * 0.6);
-        ctx.lineTo(cx + Math.cos(a + 2.1) * hw * 0.46, cy + Math.sin(a + 2.1) * hh * 0.46);
-        ctx.stroke();
-      }
-      ctx.restore();
-    },
-
-    /* 얼음: 속이 비치는 판 + 갇힌 기포 + 결빙선 */
-    ice: function (ctx, t, m, cx, cy, hw, hh) {
-      ctx.save();
-      var g = ctx.createLinearGradient(cx - hw, cy - hh, cx + hw, cy + hh);
-      g.addColorStop(0, 'rgba(255,255,255,.72)');
-      g.addColorStop(0.5, 'rgba(190,232,248,.45)');
-      g.addColorStop(1, 'rgba(126,192,222,.6)');
-      ctx.fillStyle = g;
-      diamond(ctx, cx, cy, 0.9, 0.9); ctx.fill();
-
-      // 얼음판을 가로지르는 결빙선
-      ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
-      for (var k = 0; k < 3; k++) {
-        var a = t.seed * 0.7 + k * 1.05;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(a) * hw * 0.74, cy + Math.sin(a) * hh * 0.74);
-        ctx.lineTo(cx - Math.cos(a + 0.4) * hw * 0.68, cy - Math.sin(a + 0.4) * hh * 0.68);
-        ctx.stroke();
-      }
-      // 안에 갇힌 기포
-      for (var b = 0; b < 6; b++) {
-        var ba = t.seed * 1.9 + b * 1.31;
-        var br = 0.18 + (b % 3) * 0.2;
-        ctx.fillStyle = 'rgba(255,255,255,.75)';
-        ctx.beginPath();
-        ctx.ellipse(cx + Math.cos(ba) * hw * br, cy + Math.sin(ba) * hh * br,
-          1.8 + (b % 2), 1.3 + (b % 2) * 0.6, 0, 0, 6.2832);
-        ctx.fill();
-      }
-      ctx.restore();
     }
   };
 
   /**
    * 부서진 자리 — 어두운 구멍과 삐죽삐죽한 테두리.
-   * 이 구멍은 그대로 남는다. 다시 채워지지 않는다.
+   * 곧 되살아나므로 복구 진행도에 맞춰 옅어진다.
    */
   function drawHole(ctx, t, m, sx, sy, hw, hh, alpha) {
     var fade = Math.min(1, (t.broken - 0.55) / 0.45);
+
+    /* 에어캡은 **깨지지 않는다**. 알이 전부 터졌을 뿐이라 시트는 그대로 남는다.
+       여기서 어두운 구멍과 삐죽한 파편을 그리면 비닐이 유리처럼 보인다. */
+    if (t.mat === 'bubble') { drawPoppedSheet(ctx, t, m, sx, sy, hw, hh, fade); return; }
+
     ctx.save();
     ctx.globalAlpha = fade;
 
@@ -1057,45 +1026,110 @@ SK.Tiles = (function () {
     ctx.restore();
   }
 
-  /* ---------- 점프 목표 표시 ---------- */
-  function drawAim(ctx, t, cx, cy, now) {
-    // 흰 점선은 눈·모래·솜 타일 위에서 묻혔다. 청록으로 바꾸고
-    // 은은한 맥동 대신 또렷하게 점멸시킨다.
-    var on = Math.sin(now * 9) > -0.25 ? 1 : 0.2;
+  /** 알이 전부 터진 에어캡 — 납작하게 주저앉은 비닐 시트와 주름만 남는다 */
+  function drawPoppedSheet(ctx, t, m, sx, sy, hw, hh, fade) {
     ctx.save();
-    ctx.globalAlpha = t.aim;
+    ctx.globalAlpha = 1;
 
-    ctx.fillStyle = 'rgba(0,229,255,' + (0.08 + on * 0.2) + ')';
-    diamond(ctx, cx, cy, 0.99, 0.99); ctx.fill();
+    // 바람 빠진 시트 — 가운데가 살짝 꺼지고 가장자리가 들린다
+    var g = ctx.createRadialGradient(sx, sy, 2, sx, sy, hw);
+    g.addColorStop(0, 'rgba(150,196,224,.95)');
+    g.addColorStop(0.7, 'rgba(196,228,246,.95)');
+    g.addColorStop(1, 'rgba(226,244,255,.95)');
+    ctx.fillStyle = g;
+    diamond(ctx, sx, sy, 0.92, 0.92); ctx.fill();
+    ctx.strokeStyle = 'rgba(96,152,186,.75)'; ctx.lineWidth = 1.6;
+    diamond(ctx, sx, sy, 0.92, 0.92); ctx.stroke();
 
-    ctx.setLineDash([9, 7]);
-    ctx.lineDashOffset = -now * 26;
-    // 밝은 타일에서도 점선이 보이도록 어두운 밑선을 먼저 깐다
-    ctx.strokeStyle = 'rgba(8,14,40,' + (0.3 + on * 0.45) + ')';
-    ctx.lineWidth = 7;
-    diamond(ctx, cx, cy, 0.99, 0.99); ctx.stroke();
-    ctx.strokeStyle = 'rgba(94,246,255,' + on + ')';
-    ctx.lineWidth = 3.5;
-    diamond(ctx, cx, cy, 0.99, 0.99); ctx.stroke();
-    ctx.setLineDash([]);
+    // 터진 알 자국 — 알이 있던 자리마다 쭈글쭈글한 주름
+    ctx.strokeStyle = 'rgba(48,104,138,.8)';
+    ctx.lineWidth = 1.5;
+    for (var k = 0; k < BUBBLE_CELLS.length; k++) {
+      var c = BUBBLE_CELLS[k];
+      var bx = sx + (c[0] - c[1]) * hw * 0.3;
+      var by = sy + (c[0] + c[1]) * hh * 0.3;
+      ctx.beginPath(); ctx.ellipse(bx, by, 9, 4.4, 0, 0, 6.2832); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(bx - 6, by - 1.2); ctx.lineTo(bx + 2, by + 1.8);
+      ctx.lineTo(bx + 6, by - 1.6);
+      ctx.stroke();
+    }
+
+    // 비닐다운 미끈한 반사 한 줄
+    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sx - hw * 0.5, sy - hh * 0.12);
+    ctx.quadraticCurveTo(sx, sy - hh * 0.4, sx + hw * 0.45, sy - hh * 0.05);
+    ctx.stroke();
     ctx.restore();
   }
 
-  /** 발판이 없는 빈칸 — 디디면 떨어지는 자리라는 것이 보여야 한다 */
-  function drawGap(ctx, cx, cy) {
-    var hw = Iso.TW / 2;
+  /* ---------- 점프 목표 표시 ----------
+   *
+   *  예전에는 흰 점선이었다. 그런데 이 게임에는 **눈·모래·솜·키캡처럼 윗면이 흰
+   *  타일**이 있어서, 하필 그 위에서 조준 표시가 사라졌다. 힌트(노랑)·정답(초록)·
+   *  오답(분홍)이 이미 쓰이고 있으므로 조준은 남은 청록(--aim)을 쓴다.
+   *
+   *  가시성을 세 겹으로 확보한다.
+   *    1) 어두운 밑선 — 밝은 타일 위에서도 테두리가 끊기지 않는다
+   *    2) 흐르는 청록 점선 + 글로우 — 어두운 타일 위에서 빛난다
+   *    3) 깜빡임 + 밖으로 퍼지는 링 — 정지 화면에서도 눈에 먼저 들어온다
+   */
+  var AIM_RGB = '93,240,255';
+
+  function drawAim(ctx, t, cx, cy, now) {
+    var blink = 0.62 + 0.38 * Math.sin(now * 6.4);       // 약 1초에 한 번
+    var a = t.aim;
     ctx.save();
-    var g = ctx.createRadialGradient(cx, cy, 2, cx, cy, hw);
-    g.addColorStop(0, 'rgba(4,6,18,.5)');
-    g.addColorStop(1, 'rgba(8,10,26,0)');
-    ctx.fillStyle = g;
-    diamond(ctx, cx, cy, 1, 1); ctx.fill();
-    ctx.strokeStyle = 'rgba(126,136,196,.38)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5, 9]);
-    diamond(ctx, cx, cy, 0.96, 0.96); ctx.stroke();
+
+    // 1) 어두운 밑선 — 흰 타일 위 대비 확보
+    ctx.globalAlpha = a * 0.75;
+    ctx.strokeStyle = 'rgba(6,20,32,.85)';
+    ctx.lineWidth = 7;
+    ctx.lineJoin = 'round';
+    diamond(ctx, cx, cy, 0.99, 0.99); ctx.stroke();
+
+    // 2) 흐르는 점선 + 글로우
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = 'rgba(' + AIM_RGB + ',' + (0.55 + blink * 0.45) + ')';
+    ctx.lineWidth = 4;
+    ctx.shadowColor = 'rgba(' + AIM_RGB + ',.9)';
+    ctx.shadowBlur = 10 + blink * 10;
+    ctx.setLineDash([11, 8]);
+    ctx.lineDashOffset = -now * 34;
+    diamond(ctx, cx, cy, 0.99, 0.99); ctx.stroke();
     ctx.setLineDash([]);
+    ctx.shadowBlur = 0;
+
+    // 3) 밖으로 퍼지는 링 — 1.1초 주기로 한 번씩 번진다
+    var w = (now % 1.1) / 1.1;
+    ctx.globalAlpha = a * (1 - w) * 0.55;
+    ctx.strokeStyle = 'rgba(' + AIM_RGB + ',1)';
+    ctx.lineWidth = 2.5;
+    diamond(ctx, cx, cy, 0.99 + w * 0.42, 0.99 + w * 0.42); ctx.stroke();
+
+    // 안쪽 틴트 — 어느 칸이 잡혔는지 면으로도 보이게
+    ctx.globalAlpha = a * (0.12 + blink * 0.14);
+    ctx.fillStyle = 'rgba(' + AIM_RGB + ',1)';
+    diamond(ctx, cx, cy, 0.99, 0.99); ctx.fill();
+
+    // 네 꼭짓점 표식 — 점선이 마침 끊긴 자리에서도 모서리는 남는다
+    ctx.globalAlpha = a * (0.6 + blink * 0.4);
+    ctx.fillStyle = 'rgba(255,255,255,.95)';
+    var hw = Iso.TW / 2, hh = Iso.TH / 2;
+    var pts = [[0, -hh], [hw, 0], [0, hh], [-hw, 0]];
+    for (var k = 0; k < 4; k++) {
+      ctx.beginPath();
+      ctx.arc(cx + pts[k][0] * 0.99, cy + pts[k][1] * 0.99, 3.2, 0, 6.2832);
+      ctx.fill();
+    }
     ctx.restore();
+  }
+
+  /** 타일마다 고정된 0~1 난수. Math.random()을 쓰면 매 프레임 무늬가 요동친다. */
+  function rnd1(seed, k) {
+    var v = Math.sin(seed * 12.9898 + k * 78.233) * 43758.5453;
+    return v - Math.floor(v);
   }
 
   function diamond(ctx, cx, cy, kx, ky) {
@@ -1176,6 +1210,8 @@ SK.Tiles = (function () {
     surfaceOffset: surfaceOffset,
     thicknessOf: thicknessOf,
     isSolid: isSolid,
+    reset: reset,
+    BUBBLE_CELLS: BUBBLE_CELLS,
     setIso: setIso
   };
 })();
