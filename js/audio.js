@@ -594,6 +594,114 @@ SK.Audio = (function () {
       });
     },
 
+    /* 물웅덩이 — 수면을 때리는 찰방 + 튀어오르는 물방울.
+       물방울은 '위로 쓸려 올라가는' 짧은 톤이다. 내려가면 물이 아니라 방울 떨어지는 소리가 된다 */
+    water: function (d, D, i, r, t) {
+      var g = 0.253 + 0.321 * i;
+      noiseVoice({
+        dest: d, t: t, filter: 'bandpass', freq: 2600 * r, freqEnd: 700 * r,
+        q: 0.8, gain: g, dur: 0.1, attack: 0.002
+      });
+      // 물이 밀려나며 생기는 낮은 울림
+      toneVoice({ dest: d, t: t, freq: 240 * r, freqEnd: 120 * r, type: 'sine', gain: g * 0.45, dur: 0.12, lp: 420 });
+      // 튀어오른 방울들
+      for (var k = 0; k < 4; k++) {
+        toneVoice({
+          dest: D[k % 3], t: t + 0.03 + Math.random() * 0.16,
+          freq: rnd(700, 1500) * r, freqEnd: rnd(1900, 3200) * r, type: 'sine',
+          gain: g * 0.22, dur: 0.022, attack: 0.001, lp: 5200
+        });
+      }
+      granular({
+        dests: D, t: t + 0.01, count: 10, span: 0.12,
+        freq: [1800, 6000], q: 3, gain: g * 0.16, grain: [0.004, 0.014], decay: 1.3
+      });
+    },
+
+    /* 자갈 — 돌 여러 알이 서로 부딪힌다. 모드 감쇠가 짧아야 '돌'이지, 길면 실로폰이 된다 */
+    gravel: function (d, D, i, r, t) {
+      var g = 0.237 + 0.331 * i;
+      var n = 7 + Math.round(i * 5);
+      for (var k = 0; k < n; k++) {
+        modalVoice({
+          dest: D[k % 3], t: t + Math.pow(Math.random(), 0.7) * 0.15,
+          base: rnd(320, 760) * r, gain: g * rnd(0.4, 1), jitter: 0.045,
+          modes: [{ f: 1.00, d: rnd(0.018, 0.045), g: 1.0 }, { f: 2.74, d: 0.014, g: 0.35 }]
+        });
+      }
+      noiseVoice({ dest: d, t: t, filter: 'bandpass', freq: 1500 * r, q: 0.9, gain: g * 0.7, dur: 0.07, attack: 0.003 });
+      granular({
+        dests: D, t: t, count: 12, span: 0.14,
+        freq: [1200 * r, 5200 * r], q: 2.6, gain: g * 0.28, grain: [0.004, 0.014], decay: 1.2
+      });
+    },
+
+    /* 이끼 — 젖은 솜. 공기와 물기가 함께 빠져나간다 */
+    moss: function (d, D, i, r, t) {
+      var g = 0.112 + 0.145 * i;
+      noiseVoice({
+        dest: d, t: t, filter: 'lowpass', freq: 760 * r, freqEnd: 260 * r,
+        q: 0.6, gain: g, dur: 0.18, attack: 0.02
+      });
+      modalVoice({
+        dest: d, t: t, base: 88 * r, gain: g * 0.8, jitter: 0.03,
+        modes: [{ f: 1.00, d: 0.2, g: 1.0, a: 0.012 }, { f: 1.81, d: 0.1, g: 0.28 }]
+      });
+      granular({
+        dests: D, t: t + 0.012, count: 12, span: 0.16,
+        freq: [900, 3600], q: 2.6, gain: g * 0.14, grain: [0.005, 0.02], decay: 1.3
+      });
+    },
+
+    /* 스티로폼 — 알갱이가 비벼지는 높고 마른 끼익.
+       고역만 쌓으면 거의 들리지 않는다. 발밑에서 눌리는 둔한 몸통이 함께 있어야 한다 */
+    foam: function (d, D, i, r, t) {
+      var g = 0.253 + 0.321 * i;
+      squeak({ dest: d, t: t + 0.008, base: 1100 * r, rise: 0.9, gain: g * 0.9, count: 8, span: 0.15, q: 6 });
+      noiseVoice({ dest: d, t: t, filter: 'highpass', freq: 2600 * r, gain: g * 0.4, dur: 0.1, attack: 0.008 });
+      noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 520 * r, q: 0.6, gain: g * 0.55, dur: 0.12, attack: 0.012 });
+      modalVoice({
+        dest: d, t: t, base: 112 * r, gain: g * 0.5, jitter: 0.03,
+        modes: [{ f: 1.00, d: 0.09, g: 1.0, a: 0.006 }, { f: 2.2, d: 0.05, g: 0.25 }]
+      });
+    },
+
+    /* 종이 — 낙엽과 같은 그래뉼러지만 알갱이가 잘다.
+       12kHz 까지 올렸더니 거의 들리지 않았다. 낙엽보다 조금만 높게 잡는다 */
+    paper: function (d, D, i, r, t) {
+      var g = 0.597 + 0.781 * i;
+      granular({
+        dests: D, t: t, count: 24, span: 0.19,
+        freq: [2800 * r, 9500 * r], q: 3.2, gain: g, grain: [0.003, 0.014], decay: 1.35
+      });
+      noiseVoice({ dest: d, t: t, filter: 'bandpass', freq: 1600 * r, q: 0.8, gain: g * 0.4, dur: 0.08, attack: 0.005 });
+      noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 700 * r, q: 0.6, gain: g * 0.45, dur: 0.07, attack: 0.006 });
+      modalVoice({ dest: d, t: t, base: 150 * r, gain: g * 0.3, jitter: 0.05, modes: [{ f: 1.0, d: 0.05, g: 1.0 }] });
+    },
+
+    /* 얼음 — 쩍 갈라지고, 균열이 판 아래로 번진다 */
+    ice: function (d, D, i, r, t) {
+      var g = 0.197 + 0.269 * i;
+      noiseVoice({ dest: d, t: t, filter: 'highpass', freq: 5200, gain: g * 0.8, dur: 0.006, attack: 0.0004 });
+      modalVoice({
+        dest: d, t: t, base: 620 * r, gain: g, jitter: 0.02,
+        modes: [
+          { f: 1.00, d: 0.22, g: 1.00 },
+          { f: 2.71, d: 0.12, g: 0.34 },
+          { f: 4.33, d: 0.06, g: 0.14 }
+        ]
+      });
+      // 번지는 균열 — 아래로 훑는 좁은 대역
+      noiseVoice({
+        dest: d, t: t + 0.01, filter: 'bandpass', freq: 2400 * r, freqEnd: 600 * r,
+        q: 5, gain: g * 0.5, dur: 0.12, attack: 0.003
+      });
+      granular({
+        dests: D, t: t + 0.01, count: 9, span: 0.12,
+        freq: [2600, 9000], q: 4, gain: g * 0.2, grain: [0.003, 0.012], decay: 1.2
+      });
+    },
+
     /* 스펀지 — 공기를 머금었다 내뱉는 뽀드득 */
     sponge: function (d, D, i, r, t) {
       var g = 0.119 + 0.157 * i;

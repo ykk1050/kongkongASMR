@@ -108,7 +108,7 @@ body{
 .legend-title span{font-weight:500;opacity:.75}
 #legendList{
   display:flex;flex-direction:column;gap:4px;
-  max-height:min(40vh,300px);overflow-y:auto;overscroll-behavior:contain;
+  max-height:min(48vh,360px);overflow-y:auto;overscroll-behavior:contain;
   -webkit-overflow-scrolling:touch;padding-right:2px;
 }
 #legendList::-webkit-scrollbar{width:5px}
