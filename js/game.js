@@ -60,6 +60,18 @@ SK.Game = (function () {
    *  (조이스틱 '쿵' 버튼에도 똑같이 걸린다.) */
   var JUMP_STALE_MS = 900;          // 탭이 멈춰 있었을 때를 대비한 안전장치
 
+  /* 제자리 내려찍기로 확정하기 전에 방향을 기다려 주는 시간.
+   *
+   *  ⚠ 조준과 점프를 **거의 동시에** 누르면, 방향 키가 몇 ms 늦게 도착하는 것만으로
+   *  그 프레임이 '방향 없음'이 되어 제자리 내려찍기로 끝나 버린다. 사람은 두 키를
+   *  정확히 같은 순간에 누르지 못하므로 이건 사실상 항상 일어난다 —
+   *  "조준하고 바로 눌렀는데 안 움직인다"의 정체다.
+   *
+   *  그래서 **조준이 없을 때만** 점프 판정을 이만큼 미룬다. 그 사이에 방향이 오면
+   *  그 칸으로 뛰고, 끝내 안 오면 그때 내려찍는다. 조준이 이미 있으면 한 프레임도
+   *  기다리지 않으므로 평소 반응은 그대로다. */
+  var STOMP_GRACE_MS = 130;
+
   function requestJump() { input.jumpAt = performance.now(); }
   function consumeJump() { input.jumpAt = -1e9; }
   function jumpPending() { return performance.now() - input.jumpAt < JUMP_STALE_MS; }
@@ -100,6 +112,17 @@ SK.Game = (function () {
     START = { i: (GRID - 1) >> 1, j: (GRID - 1) >> 1 };
   }
 
+  /* 보드에 빈 칸(구멍)을 낸다.
+   *
+   *  전부 타일로 채우면 어디로 뛰든 안전해서 조준할 이유가 없다. 구멍이 있어야
+   *  "어디로 뛸지"가 선택이 된다. 다만 두 가지를 반드시 지켜야 한다.
+   *    · 시작 칸은 절대 구멍이 아니다
+   *    · 남은 타일이 **하나로 이어져 있어야** 한다 — 섬이 생기면 문제 글자를
+   *      영영 못 밟는 판이 만들어진다. 그래서 구멍을 하나 뚫을 때마다
+   *      연결성을 검사하고, 끊기면 되돌린다.
+   */
+  var HOLE_RATIO = 0.16;
+
   function buildWorld() {
     tiles = []; tileAt = {};
     for (var i = 0; i < GRID; i++) {
@@ -107,6 +130,53 @@ SK.Game = (function () {
         var t = SK.Tiles.make(i, j, ambientMat(i, j));
         tiles.push(t);
         tileAt[i + ',' + j] = t;
+      }
+    }
+    carveHoles();
+  }
+
+  /** 남은 타일이 전부 이어져 있는가 (8방향 이웃 기준) */
+  function allConnected() {
+    var total = 0, startKey = null;
+    for (var k in tileAt) { total++; if (startKey === null) startKey = k; }
+    if (!total) return false;
+    var seen = Object.create(null), queue = [startKey];
+    seen[startKey] = true;
+    var DIRS = SK.Player.DIRS;
+    while (queue.length) {
+      var parts = queue.pop().split(',');
+      var ci = +parts[0], cj = +parts[1];
+      for (var d = 0; d < DIRS.length; d++) {
+        var key = (ci + DIRS[d].di) + ',' + (cj + DIRS[d].dj);
+        if (tileAt[key] && !seen[key]) { seen[key] = true; queue.push(key); }
+      }
+    }
+    var reached = 0;
+    for (var s2 in seen) reached++;
+    return reached === total;
+  }
+
+  function carveHoles() {
+    var cand = [];
+    for (var i = 0; i < GRID; i++) {
+      for (var j = 0; j < GRID; j++) {
+        if (i === START.i && j === START.j) continue;     // 시작 칸은 남긴다
+        cand.push({ i: i, j: j });
+      }
+    }
+    cand = SK.Quiz.shuffle(cand);
+
+    var want = Math.round(GRID * GRID * HOLE_RATIO);
+    for (var n = 0; n < cand.length && want > 0; n++) {
+      var c = cand[n], key = c.i + ',' + c.j;
+      var t = tileAt[key];
+      if (!t) continue;
+      delete tileAt[key];
+      if (allConnected()) {
+        tiles.splice(tiles.indexOf(t), 1);                // 진짜로 없앤다
+        want--;
+      } else {
+        tileAt[key] = t;                                  // 섬이 생기면 되돌린다
       }
     }
   }
@@ -172,6 +242,7 @@ SK.Game = (function () {
     for (var i = 0; i < GRID; i++) {
       for (var j = 0; j < GRID; j++) {
         if (player && i === player.ci && j === player.cj) continue;
+        if (!getTile(i, j)) continue;          // 구멍에는 글자를 놓을 수 없다
         cand.push({ i: i, j: j });
       }
     }
@@ -660,10 +731,9 @@ SK.Game = (function () {
   }
 
   var worldApi = {
-    canEnter: function (i, j) {
-      if (!inBounds(i, j)) return false;
-      return SK.Tiles.isSolid(getTile(i, j));
-    },
+    /* 보드 안이면 구멍이라도 뛸 수 있다 — 떨어지는 것도 플레이어의 선택이다.
+       (보드 밖은 여전히 막는다. 화면 밖으로 사라지면 복구할 자리가 없다) */
+    canEnter: function (i, j) { return inBounds(i, j); },
     surfaceOf: function (i, j) {
       return SK.Tiles.surfaceOffset(getTile(i, j));
     }
@@ -684,7 +754,12 @@ SK.Game = (function () {
 
     // 이번 프레임에 플레이어가 '뛸 수 있는 상태'였는가 — 요청 소비 판단의 기준
     var couldAct = !player.hopping && player.cooldown <= 0 && player.stunTimer <= 0;
-    var wantJump = input.jumpHeld || jumpPending();
+
+    // 조준이 아직 없는 점프 요청은 STOMP_GRACE_MS 동안 붙들고 방향을 기다린다
+    var hasAim = !!(input.dx || input.dy || player.aimDir);
+    var waitingForAim = !hasAim && (performance.now() - input.jumpAt < STOMP_GRACE_MS);
+
+    var wantJump = (input.jumpHeld || jumpPending()) && !waitingForAim;
     var wasHopping = player.hopping;
     SK.Player.update(player, { dx: input.dx, dy: input.dy, jump: wantJump }, dt, worldApi, {
       onTakeoff: function (power) { SK.Audio.whoosh(power, panOf(player.x, player.y)); },
@@ -695,8 +770,8 @@ SK.Game = (function () {
       clearKeyCombine();
     }
     // 뛸 기회가 있었던 프레임에서만 점프 요청을 소비한다.
-    // 못 뛰는 구간이었다면 그대로 남겨 두었다가 기회가 오는 순간 발동시킨다.
-    if (couldAct) consumeJump();
+    // 못 뛰는 구간이거나 방향을 기다리는 중이면 그대로 남겨 둔다.
+    if (couldAct && !waitingForAim) consumeJump();
 
     // 점프 궤적 (소리 ↔ 시각 연결)
     if (player.hopping && Math.random() < 0.55) {
@@ -720,13 +795,25 @@ SK.Game = (function () {
   }
 
   /** 지금 점프하면 어디에 착지하는지 타일에 표시한다 */
+  /* 구멍을 조준했을 때의 경고 표시.
+     타일이 없으니 t.aim 에 실을 수 없어 따로 들고 다닌다. 표시가 아예 없으면
+     플레이어는 "방향이 안 잡혔다"고 오해한다 — 그건 조준이 사라지는 버그와
+     구별되지 않는다. 그래서 구멍도 반드시 무언가를 보여 준다. */
+  var holeAim = { i: 0, j: 0, a: 0 };
+
   function updateAim(dt) {
-    var target = null;
+    var target = null, holeTarget = null;
     if (!player.hopping && player.stunTimer <= 0 && player.aimDir) {
       var ni = player.ci + player.aimDir.di;
       var nj = player.cj + player.aimDir.dj;
-      if (worldApi.canEnter(ni, nj)) target = getTile(ni, nj);
+      if (worldApi.canEnter(ni, nj)) {
+        target = getTile(ni, nj);
+        if (!target) holeTarget = { i: ni, j: nj };
+      }
     }
+    if (holeTarget) { holeAim.i = holeTarget.i; holeAim.j = holeTarget.j; }
+    holeAim.a += ((holeTarget ? 1 : 0) - holeAim.a) * Math.min(1, dt * 14);
+    if (holeAim.a < 0.01) holeAim.a = 0;
     for (var k = 0; k < tiles.length; k++) {
       var t = tiles[k];
       var want = (t === target) ? 1 : 0;
@@ -751,7 +838,7 @@ SK.Game = (function () {
    * ======================================================= */
   function land(intensity, power, i, j) {
     var t = getTile(i, j);
-    if (!t) return;
+    if (!t) { fallIntoHole(i, j); return; }
     var mat = t.mat;
     var pan = panOf(i, j), depth = depthOf(i, j);
 
@@ -785,6 +872,87 @@ SK.Game = (function () {
     }
 
     visit(t);
+  }
+
+  /** 구멍 조준 표시 — 붉은 점선과 아래로 떨어지는 화살표 */
+  function drawHoleAim(ctx, h) {
+    var p = world(h.i, h.j, 0);
+    var hw = SK.Iso.TW / 2, hh = SK.Iso.TH / 2;
+    var blink = 0.6 + 0.4 * Math.sin(now * 7);
+
+    ctx.save();
+    ctx.globalAlpha = h.a;
+    ctx.translate(p.x, p.y);
+
+    // 어두운 밑선 — 배경이 무엇이든 읽히게
+    ctx.strokeStyle = 'rgba(10,4,10,.8)';
+    ctx.lineWidth = 6; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -hh); ctx.lineTo(hw, 0); ctx.lineTo(0, hh); ctx.lineTo(-hw, 0);
+    ctx.closePath(); ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255,120,140,' + (0.6 + blink * 0.4) + ')';
+    ctx.lineWidth = 3.5;
+    ctx.setLineDash([8, 7]);
+    ctx.lineDashOffset = now * 30;
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(255,120,140,' + (0.10 + blink * 0.10) + ')';
+    ctx.fill();
+
+    // 아래로 떨어지는 화살표 — "여기는 빈 칸" 이라고 말해 준다
+    ctx.strokeStyle = 'rgba(255,190,200,' + (0.5 + blink * 0.5) + ')';
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -9); ctx.lineTo(0, 7);
+    ctx.moveTo(-6, 1); ctx.lineTo(0, 8); ctx.lineTo(6, 1);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /* =========================================================
+   *  구멍에 빠짐 — 점수를 잃고 직전 발판으로 돌아온다
+   * ======================================================= */
+  var FALL_PENALTY = 15;
+
+  function fallIntoHole(i, j) {
+    phase = 'wrong';
+    phaseTimer = 1.0;
+    streak = 0; combo = 0;
+    score = Math.max(0, score - FALL_PENALTY);
+
+    var pan = panOf(i, j);
+    SK.Audio.hollow({ pan: pan });
+    SK.Particles.text(i, j, '앗!', { size: 28, color: '#ff9aa8', life: 0.9, gz: 0.2, vz: 0.02 });
+    SK.Particles.text(i, j, '-' + FALL_PENALTY, { size: 20, color: '#ff9aa8', life: 1.0, gz: 0.7, vz: 0.03 });
+    SK.Particles.ring(i, j, { size: 110, life: 0.6, width: 3, color: 'rgba(255,154,168,' });
+    cam.shake = 0.7;
+    setFlash(0.22, 352);
+
+    // 직전에 서 있던 발판으로 돌려보낸다. 그 자리도 사라졌다면 가장 가까운 타일로.
+    var back = getTile(player.fromI, player.fromJ) ? { i: player.fromI, j: player.fromJ }
+                                                   : nearestTile(i, j);
+    player.ci = back.i; player.cj = back.j;
+    player.x = back.i; player.y = back.j; player.z = 0;
+    player.fromI = back.i; player.fromJ = back.j;
+    player.hopping = false;
+    player.surface = player.surfaceTarget = worldApi.surfaceOf(back.i, back.j);
+    SK.Player.stun(player, 0.55);
+
+    SK.Particles.ring(back.i, back.j, { size: 80, life: 0.45, width: 2.5, color: 'rgba(255,255,255,' });
+    renderHUD(false, true);
+  }
+
+  /** 주어진 칸에서 가장 가까운 실제 타일 */
+  function nearestTile(i, j) {
+    var best = null, bestD = Infinity;
+    for (var k = 0; k < tiles.length; k++) {
+      var t = tiles[k];
+      var d = (t.i - i) * (t.i - i) + (t.j - j) * (t.j - j);
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    return best ? { i: best.i, j: best.j } : { i: START.i, j: START.j };
   }
 
   /* =========================================================
@@ -988,6 +1156,8 @@ SK.Game = (function () {
         SK.Player.draw(ctx, player, now, ps.x, ps.y, player.z * SK.Iso.TZ * 2);
       }
     }
+
+    if (holeAim.a > 0.01) drawHoleAim(ctx, holeAim);
 
     SK.Particles.draw(ctx, SK.Iso);
     ctx.restore();
