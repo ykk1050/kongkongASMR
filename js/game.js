@@ -233,23 +233,12 @@ SK.Game = (function () {
     KeyJ: 1, KeyK: 1, KeyF: 1
   };
 
-  /* 같은 방향 키를 톡톡 두 번 = 점프.
-   *
-   *  ⚠ 이것이 방향키로 대각선을 뛰는 **확실한 길**이다.
-   *  `↑`+`←` 를 누른 채 `Space` 를 누르면 세 키 동시입력이라, 값싼 키보드는 세 번째
-   *  키(보통 Space)를 통째로 삼킨다. 브라우저에 아예 도착하지 않으므로 JS로는
-   *  손쓸 방법이 없다. 그래서 **점프에 별도 키를 안 쓰는 길**을 하나 열어 둔다 —
-   *  `↑` 톡, `←` 톡, `←` 톡. 한 번에 눌리는 키가 늘 하나뿐이라 어떤 키보드에서도 된다.
-   *  (조준은 COMBINE_MS 동안 합쳐지므로 마지막 톡톡이 대각선 점프가 된다.)
-   */
-  var TAP_JUMP_MS = 330;
-  var lastTap = { code: null, at: 0 };
 
   function bindKeys() {
     window.addEventListener('keydown', function (e) {
       if (JUMPKEY[e.code]) {
         e.preventDefault();
-        if (!input.keys[e.code]) requestJump();
+        if (!input.keys[e.code]) { requestJump(); if (diagEl) pushDiag('down', e.code); }
         input.keys[e.code] = true;
         input.jumpHeld = true;
         return;
@@ -262,21 +251,17 @@ SK.Game = (function () {
         if (tnow - dirCombo.lastAt > COMBINE_MS) dirCombo.codes = Object.create(null);
         dirCombo.codes[e.code] = true;
         dirCombo.lastAt = tnow;
-        if (lastTap.code === e.code && tnow - lastTap.at < TAP_JUMP_MS) {
-          requestJump();                         // 톡톡 → 점프
-          lastTap.code = null;                   // 3연타가 연속 점프로 번지지 않게
-        } else {
-          lastTap.code = e.code; lastTap.at = tnow;
-        }
       }
       input.keys[e.code] = true;
       if (keyLog) logKey('down', e.code);
+      if (diagEl) pushDiag('down', e.code);
       syncKeyDir();
     });
     window.addEventListener('keyup', function (e) {
       if (JUMPKEY[e.code]) {
         e.preventDefault();
         input.keys[e.code] = false;
+        if (diagEl) pushDiag('up', e.code);
         // 점프 키를 여러 개 두었으므로, 하나를 떼도 다른 하나가 눌려 있으면 유지한다
         input.jumpHeld = anyHeld(JUMPKEY);
         return;
@@ -285,6 +270,7 @@ SK.Game = (function () {
       e.preventDefault();
       input.keys[e.code] = false;
       if (keyLog) logKey('up  ', e.code);
+      if (diagEl) pushDiag('up', e.code);
       syncKeyDir();
     });
     window.addEventListener('blur', function () {
@@ -292,7 +278,6 @@ SK.Game = (function () {
       dirCombo.codes = Object.create(null);
       dirCombo.lastAt = -1e9;
       input.jumpHeld = false;
-      lastTap.code = null;
       syncKeyDir();
     });
   }
@@ -310,6 +295,48 @@ SK.Game = (function () {
     var held = [];
     for (var c in KEYDIR) if (input.keys[c]) held.push(c);
     console.log('[key] ' + kind + ' ' + code + '   held=[' + held.join(' ') + ']');
+  }
+
+  /* ---------- 입력 진단 패널 ----------
+   *
+   *  "키를 눌렀는데 안 먹는다"는 원인이 둘 중 하나다 — 게임이 잘못 처리했거나,
+   *  **키 이벤트가 브라우저에 아예 도착하지 않았거나**. 둘은 증상이 똑같아서
+   *  화면만 봐서는 구별할 수 없다. 이 패널은 도착한 키를 그대로 보여 주므로
+   *  한눈에 갈린다 — Space 를 눌렀는데 목록에 안 뜨면 키보드가 삼킨 것이다. */
+  var diagEl = null, diagLog = [];
+
+  function setDiag(on) {
+    if (!on) { if (diagEl) { diagEl.remove(); diagEl = null; } return false; }
+    if (!diagEl) {
+      diagEl = document.createElement('div');
+      diagEl.id = 'inputDiag';
+      document.body.appendChild(diagEl);
+    }
+    return true;
+  }
+  function isDiag() { return !!diagEl; }
+
+  function shortKey(code) { return code.replace('Arrow', '').replace('Key', ''); }
+
+  function pushDiag(kind, code) {
+    diagLog.push((kind === 'down' ? '▼' : '△') + shortKey(code));
+    if (diagLog.length > 8) diagLog.shift();
+  }
+
+  function renderDiag() {
+    if (!diagEl) return;
+    var held = [], c, j;
+    for (c in KEYDIR) if (input.keys[c]) held.push(shortKey(c));
+    for (j in JUMPKEY) if (input.keys[j]) held.push(shortKey(j));
+    var d = player && player.aimDir;
+    diagEl.innerHTML =
+      '<b>입력 진단</b>' +
+      '<div>받은 키 ' + (diagLog.join(' ') || '—') + '</div>' +
+      '<div>지금 눌림 <b>' + (held.join(' + ') || '—') + '</b></div>' +
+      '<div>방향 ' + input.dx + ',' + input.dy +
+        '  조준 <b>' + (d ? (d.di + ',' + d.dj) : '없음') + '</b></div>' +
+      '<div>점프 ' + (input.jumpHeld ? '누름' : (jumpPending() ? '대기' : '—')) +
+        '</div>';
   }
 
   /** 방향 묶음을 비운다 — 뛰고 나면 새로 잡아야 한다.
@@ -600,6 +627,7 @@ SK.Game = (function () {
     try {
       update(dt);
       render();
+      renderDiag();
     } catch (err) {
       if (loopErrors++ < 3 && window.console) console.error('[loop]', err);
     }
@@ -967,6 +995,7 @@ SK.Game = (function () {
     boot: boot,
     startWith: startWith,
     setSubject: setSubject,
+    setDiag: setDiag, isDiag: isDiag,
     skip: skip,
     relayout: resize,
     getScore: function () { return score; },

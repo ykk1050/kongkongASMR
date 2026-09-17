@@ -71,6 +71,16 @@
     SK.Game.relayout();      // 컨트롤이 사라지면 보드를 더 크게 그린다
   }
   btnPads.addEventListener('click', function () { SK.Audio.ui(); padsOn = !padsOn; applyPads(); });
+
+
+  /* 입력 진단 — 키가 브라우저에 실제로 도착하는지 보여 준다 */
+  var btnDiag = $('btnDiag');
+  btnDiag.addEventListener('click', function () {
+    SK.Audio.ui();
+    var on = SK.Game.setDiag(!SK.Game.isDiag());
+    btnDiag.textContent = on ? '🧪 입력 진단 — 켜짐' : '🧪 입력 진단';
+    btnDiag.classList.toggle('active', on);
+  });
   applyPads();
 
   // 포인터를 처음 쓰는 방식에 맞춰 자동 전환(패드에 키보드를 붙였을 때 등)

@@ -165,6 +165,22 @@ body{
 #touchJump.active{transform:scale(.93);background:#ffc233}
 body.no-pads #touchPad,body.no-pads #touchJump{display:none}
 
+/* 입력 진단 패널 — 키가 실제로 도착하는지 보여 준다 */
+#inputDiag{
+  /* HUD의 문제 문장을 가리지 않도록 조이스틱 위쪽에 둔다 */
+  position:fixed;z-index:30;pointer-events:none;
+  left:calc(var(--ctrl-gap) + var(--sl));
+  bottom:calc(var(--ctrl-gap) + var(--sb) + var(--pad-size) + 10px);
+  max-width:min(340px,calc(100vw - 20px));
+  padding:9px 12px;border-radius:12px;
+  background:rgba(8,10,24,.86);border:1px solid rgba(255,255,255,.18);
+  color:var(--ink);font-size:12px;line-height:1.75;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  backdrop-filter:blur(6px);
+}
+#inputDiag b{color:var(--accent)}
+#inputDiag div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 /* 화면이 작을수록 컨트롤도 작게 — 보드 공간을 지킨다 */
 @media (max-width:600px),(max-height:520px){
   :root{--pad-size:106px;--jump-size:74px;--ctrl-gap:12px}
