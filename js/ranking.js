@@ -23,7 +23,15 @@ SK.Ranking = (function () {
   var CFG = window.SK_RANKING || {};
   var ENDPOINT = String(CFG.endpoint || '').trim();
   var ENABLED = CFG.enabled !== false;
-  var TIMEOUT_MS = 12000;
+
+  /* Apps Script 는 처음 깨울 때 10초 넘게 걸리기도 한다. 넉넉히 기다린다. */
+  var TIMEOUT_MS = 20000;
+
+  /* onerror 가 울린 뒤에도 이만큼은 더 기다려 본다 — 아래 call() 의 설명 참고 */
+  var ERROR_GRACE_MS = 6000;
+
+  /* 실패로 판정한 뒤에도 콜백 자리를 이만큼 비워 두지 않는다 (ReferenceError 방지) */
+  var KEEP_SLOT_MS = 30000;
 
   /* =========================================================
    *  집계 조건
@@ -201,17 +209,46 @@ SK.Ranking = (function () {
       }
 
       var script = document.createElement('script');
-      var timer = null;
-      var done = function (fn, arg) {
+      var settled = false;
+      var timer = null, graceTimer = null;
+
+      /* ⚠ onerror 를 곧바로 실패로 보지 않는다.
+       *
+       *  Apps Script 는 /exec 요청을 script.googleusercontent.com 으로 넘기는데,
+       *  그 과정에서 onerror 가 **먼저** 울리고 잠시 뒤 진짜 응답이 도착하는
+       *  경우가 있다. 예전 코드는 onerror 에서 바로 실패 처리하고 콜백 함수를
+       *  지워, 뒤늦게 도착한 스크립트가 없는 함수를 부르며 터졌다
+       *  (ReferenceError: skRankN_... is not defined). 응답은 멀쩡히 왔는데
+       *  우리가 먼저 문을 닫은 셈이다.
+       *
+       *  그래서 onerror 는 '곧 실패할 것 같다'는 힌트로만 쓰고, 조금 더 기다린다.
+       *  진짜로 안 오면 그때 실패로 넘긴다. */
+      function finish(err, data) {
+        if (settled) return;
+        settled = true;
         if (timer) { clearTimeout(timer); timer = null; }
-        try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+        if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+
+        /* 콜백 자리는 바로 비우지 않는다 — 늦게 도착한 스크립트가 없어진 함수를
+           부르면 콘솔에 오류가 남는다. 아무 일도 하지 않는 함수로 바꿔 두었다가
+           한참 뒤에 치운다. */
+        window[cb] = function () {};
+        setTimeout(function () {
+          try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+        }, KEEP_SLOT_MS);
+
         if (script.parentNode) script.parentNode.removeChild(script);
-        fn(arg);
+        if (err) reject(err); else resolve(data);
+      }
+
+      window[cb] = function (data) { finish(null, data); };
+
+      script.onerror = function () {
+        if (settled || graceTimer) return;
+        graceTimer = setTimeout(function () { finish(new Error('network')); }, ERROR_GRACE_MS);
       };
 
-      window[cb] = function (data) { done(resolve, data); };
-      script.onerror = function () { done(reject, new Error('network')); };
-      timer = setTimeout(function () { done(reject, new Error('timeout')); }, TIMEOUT_MS);
+      timer = setTimeout(function () { finish(new Error('timeout')); }, TIMEOUT_MS);
 
       script.src = url;
       script.async = true;
