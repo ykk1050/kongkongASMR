@@ -2,7 +2,53 @@
  *  소리 콩콩 — 부트스트랩
  * ============================================================= */
 (function () {
-  var $ = function (id) { return document.getElementById(id); };
+
+  /* 화면에서 요소를 못 찾아도 **그 아래 배선이 통째로 죽지 않게** 한다.
+   *
+   *  ⚠ 실제로 이것 때문에 게임이 멈춘 적이 있다. 메뉴 버튼 하나를 지웠는데,
+   *    옛 main.js 를 캐시로 물고 있던 브라우저가 그 버튼을 찾다가
+   *    null.addEventListener 에서 터졌다. 같은 함수 안이라 그 아래에 있던
+   *    '산책 시작하기' 배선까지 전부 건너뛰어졌고, 버튼을 눌러도 아무 일도
+   *    일어나지 않았다. 화면에 오류 한 줄 없이.
+   *
+   *  없는 요소는 버려지는 가짜 요소로 대신한다 — 거기 붙인 이벤트는 아무도
+   *  누르지 못하고 거기 쓴 글자는 아무도 보지 못할 뿐, 나머지는 멀쩡히 돈다.
+   *  대신 무엇이 없었는지는 콘솔과 화면 아래에 남긴다.
+   */
+  var missing = [];
+
+  function $(id) {
+    var el = document.getElementById(id);
+    if (el) return el;
+    if (missing.indexOf(id) < 0) {
+      missing.push(id);
+      if (window.console) console.warn('[main] 화면에서 #' + id + ' 를 찾지 못했습니다');
+    }
+    return document.createElement('div');          // 버려지는 대역
+  }
+
+  /** 치명적이지 않은 구역을 감싼다 — 하나가 실패해도 나머지는 배선된다 */
+  function step(name, fn) {
+    try { fn(); }
+    catch (e) {
+      missing.push(name + '(' + ((e && e.message) || e) + ')');
+      if (window.console) console.error('[main] ' + name + ' 배선 실패', e);
+    }
+  }
+
+  /** 뭔가 어긋났으면 화면 아래에 조용히 알린다 — 말없이 죽는 것보다 낫다 */
+  function report() {
+    if (!missing.length) return;
+    var note = document.getElementById('loadNote');
+    if (note) note.textContent += ' · ⚠ 화면 일부를 불러오지 못했습니다 (새로고침: Ctrl+Shift+R)';
+  }
+
+  if (!window.SK || !SK.Game || !SK.Quiz) {
+    var n = document.getElementById('loadNote');
+    if (n) n.textContent = '게임 파일을 불러오지 못했습니다. Ctrl+Shift+R 로 새로고침해 주세요.';
+    if (window.console) console.error('[main] SK 모듈이 없습니다');
+    return;
+  }
 
   var refs = {
     hud: $('hud'),
@@ -27,7 +73,38 @@
     onGameOver: function (rec, auth) { showRankForm(rec, auth); }
   };
 
-  SK.Game.boot($('game'), refs);
+  step('게임 코어', function () { SK.Game.boot($('game'), refs); });
+
+  /* ---------- 시작 (사용자 제스처로 AudioContext 잠금 해제) ----------
+   *
+   *  하던 판이 남아 있으면 게임은 이미 그 판을 되살린 채로 이 화면 뒤에 떠 있다.
+   *  그래서 여기서는 "그대로 이어갈지, 버리고 새로 시작할지"만 고르면 된다. */
+  var overlay = $('startOverlay');
+  var btnStart = $('btnStart'), btnFresh = $('btnFresh');
+
+  function enterGame() {
+    SK.Audio.init();
+    SK.Audio.ui();
+    overlay.classList.add('hidden');
+    SK.Game.relayout();
+    loadAudioManifest();
+  }
+
+  btnStart.addEventListener('click', enterGame);
+  btnFresh.addEventListener('click', function () {
+    SK.Game.fresh();          // 저장을 지우고 처음부터
+    enterGame();
+  });
+
+  /** 퀴즈가 다 실려 판이 정해진 뒤에 부른다 */
+  function refreshResumeUi() {
+    var can = SK.Game.canResume && SK.Game.canResume();
+    var line = $('resumeLine'), info = $('resumeInfo');
+    if (line) line.hidden = !can;
+    if (can && info) info.textContent = SK.Save.summary();
+    btnStart.textContent = can ? '이어서 산책하기' : '산책 시작하기';
+    btnFresh.hidden = !can;
+  }
 
   /* ---------- 게임 오버 → 다시 시작 ---------- */
   $('btnRestart').addEventListener('click', function () {
@@ -42,6 +119,7 @@
     menu.hidden = !open;
     btnMenu.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
+  setMenu(false);
   btnMenu.addEventListener('click', function (e) {
     e.stopPropagation();
     SK.Audio.ui();
@@ -89,8 +167,8 @@
 
   /* ---------- 소리 도감 ---------- */
   // 타일 그림과 소리를 나란히 보여 주고, 눌러서 미리 들을 수 있게 한다.
-  (function buildLegend() {
-    var list = $('legendList');
+  step('소리 도감', function buildLegend() {
+    var list = document.getElementById('legendList');
     if (!list) return;
     // 탄성 재질 먼저, 부서지는 재질을 뒤에 — 목록은 MATERIALS 에서 자동으로 만든다
     var keys = Object.keys(SK.Tiles.MATERIALS);
@@ -129,38 +207,7 @@
       btn.addEventListener('click', function () { SK.Audio.preview(key); });
       list.appendChild(btn);
     });
-  })();
-
-  /* ---------- 시작 (사용자 제스처로 AudioContext 잠금 해제) ----------
-   *
-   *  하던 판이 남아 있으면 게임은 이미 그 판을 되살린 채로 이 화면 뒤에 떠 있다.
-   *  그래서 여기서는 "그대로 이어갈지, 버리고 새로 시작할지"만 고르면 된다. */
-  var overlay = $('startOverlay');
-  var btnStart = $('btnStart'), btnFresh = $('btnFresh');
-
-  function enterGame() {
-    SK.Audio.init();
-    SK.Audio.ui();
-    overlay.classList.add('hidden');
-    SK.Game.relayout();
-    loadAudioManifest();
-  }
-
-  btnStart.addEventListener('click', enterGame);
-  btnFresh.addEventListener('click', function () {
-    SK.Game.fresh();          // 저장을 지우고 처음부터
-    enterGame();
   });
-
-  /** 퀴즈가 다 실려 판이 정해진 뒤에 부른다 */
-  function refreshResumeUi() {
-    var can = SK.Game.canResume && SK.Game.canResume();
-    var line = $('resumeLine'), info = $('resumeInfo');
-    if (line) line.hidden = !can;
-    if (can && info) info.textContent = SK.Save.summary();
-    btnStart.textContent = can ? '이어서 산책하기' : '산책 시작하기';
-    btnFresh.hidden = !can;
-  }
 
   /** 오디오 에셋 매니페스트 (docs/AUDIO_MAPPING.md 참고) */
   function loadAudioManifest() {
@@ -475,13 +522,13 @@
   /* ---------- 퀴즈 데이터 로드 ---------- */
   SK.Quiz.load('data/quizzes.json').then(function (res) {
     SK.Game.startWith(res.quizzes, res.source);
-    refreshResumeUi();
-    buildTopicTabs();
-    buildMetricTabs();
-    syncTabs();
+    step('이어하기 안내', refreshResumeUi);
+    step('랭킹 탭', function () { buildTopicTabs(); buildMetricTabs(); syncTabs(); });
+    report();
   }).catch(function (e) {
     refs.prompt.textContent = '문제 데이터를 불러오지 못했습니다.';
     refs.hint.textContent = String((e && e.message) || e);
     if (window.console) console.error(e);
+    report();
   });
 })();

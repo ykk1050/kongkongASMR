@@ -235,6 +235,7 @@ data/
   quizzes.fallback.js       file:// 실행용 자동 생성 사본
 assets/audio/manifest.json  실제 녹음으로 교체할 때 사용 (비어 있어도 정상)
 tools/build-fallback.py     JSON 검증 + 폴백 사본 생성
+tools/stamp.py              ★ js·css 에 버전 도장 — 고친 뒤 커밋 전에 한 번
 tools/prep-steps.py         발소리 wav 자르기 · K-가중 라우드니스 정규화·측정
 .github/workflows/pages.yml GitHub Pages 자동 배포
 apps-script/Code.gs         랭킹 서버 (구글 스프레드시트에 붙이는 Apps Script)
