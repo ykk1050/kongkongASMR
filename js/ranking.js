@@ -4,16 +4,22 @@
  *  저장소는 구글 스프레드시트, 창구는 시트에 붙인 Apps Script 웹 앱이다.
  *  (설치 방법 docs/RANKING.md · 서버 코드 apps-script/Code.gs)
  *
- *  ── 왜 JSONP 인가 ───────────────────────────────────────────
+ *  ── 어떻게 부르나 — fetch 먼저, JSONP 는 예비 ────────────────
  *  Apps Script 웹 앱은 /exec 요청을 script.googleusercontent.com 으로
- *  302 로 넘긴다. 그래서 fetch 로 부르면 브라우저·배포 설정에 따라
- *  CORS 사전 요청(preflight)에서 막히는 경우가 생긴다. GitHub Pages 처럼
- *  정적 호스팅에 올려 두고 교실에서 여러 기기로 접속하는 상황에서는
- *  "어떤 기기에서는 되고 어떤 기기에서는 안 되는" 게 가장 나쁘다.
- *  <script> 태그로 부르는 JSONP 는 CORS 를 아예 타지 않아 어디서나 똑같이
- *  동작한다. 주고받는 값이 닉네임과 숫자 몇 개뿐이라 길이도 문제가 없다.
+ *  302 로 넘긴다. 그 최종 응답에는 CORS 허용 헤더가 붙어 있어서 fetch 로
+ *  그냥 읽힌다. 실제 배포 주소에서 같은 페이지로 나란히 재 보면
  *
- *  ⚠ 그래서 기록 등록도 GET 이다. 닉네임이 주소에 실리므로, 실명·연락처를
+ *      fetch          → 200, 본문 읽힘, 1.2초
+ *      <script> JSONP → onerror 도 onload 도 없이 15초 동안 감감무소식
+ *
+ *  이었다. 처음에는 'CORS 가 막힐 테니 JSONP 로 가자'고 정했는데, 이 배포에서는
+ *  그 판단이 틀렸을 뿐 아니라 <script> 주입 쪽이 환경에 따라 **조용히** 막혀
+ *  "랭킹이 안 붙는다"의 원인이 됐다. 그래서 순서를 뒤집었다.
+ *
+ *  fetch 가 막히는 환경(아주 옛 브라우저, 엄격한 CORS 설정)을 위해 JSONP 는
+ *  예비 통로로 남겨 둔다 — 둘 다 같은 주소를 같은 방식으로 부른다.
+ *
+ *  ⚠ 기록 등록도 GET 이다. 닉네임이 주소에 실리므로, 실명·연락처를
  *    닉네임에 넣지 못하게 막는 것이 더더욱 중요하다 → validateNick()
  * ============================================================= */
 window.SK = window.SK || {};
@@ -194,19 +200,70 @@ SK.Ranking = (function () {
   }
 
   /* =========================================================
-   *  JSONP 호출
+   *  호출 — fetch 먼저, 막히면 JSONP
    * ======================================================= */
   var seq = 0;
 
+  /** 주소를 만든다. cb 를 주면 JSONP 용(callback 포함), 없으면 순수 JSON 용 */
+  function buildUrl(params, cb) {
+    var url = ENDPOINT + (ENDPOINT.indexOf('?') >= 0 ? '&' : '?') +
+              (cb ? ('callback=' + cb) : '_=' + Date.now());
+    for (var k in params) {
+      if (params[k] == null) continue;
+      url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+    }
+    return url;
+  }
+
   function call(params) {
     if (!isConfigured()) return Promise.reject(new Error('endpoint-missing'));
+    return fetchCall(params).catch(function () { return jsonpCall(params); });
+  }
+
+  /** 기본 통로 — 응답에 CORS 허용 헤더가 붙어 있어 본문을 그대로 읽는다 */
+  function fetchCall(params) {
+    if (typeof fetch !== 'function' || typeof Promise !== 'function') {
+      return Promise.reject(new Error('no-fetch'));
+    }
+    var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var timer = null;
+
+    var req = fetch(buildUrl(params, null), {
+      method: 'GET',
+      credentials: 'omit',
+      redirect: 'follow',
+      signal: ctl ? ctl.signal : undefined
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(function (text) {
+      /* 순수 JSON 이 와야 정상. 혹시 JSONP 로 감싸 왔더라도 벗겨 낸다. */
+      var body = String(text).replace(/^[^{[]*\(/, '').replace(/\);?\s*$/, '');
+      return JSON.parse(body);
+    });
+
+    var timeout = new Promise(function (_, reject) {
+      timer = setTimeout(function () {
+        if (ctl) { try { ctl.abort(); } catch (e) { /* 중단이 안 돼도 거절은 한다 */ } }
+        reject(new Error('timeout'));
+      }, TIMEOUT_MS);
+    });
+
+    return Promise.race([req, timeout]).then(function (v) {
+      if (timer) clearTimeout(timer);
+      return v;
+    }, function (e) {
+      if (timer) clearTimeout(timer);
+      throw e;
+    });
+  }
+
+  /** 예비 통로 — fetch 가 막히는 환경용 */
+  function jsonpCall(params) {
     return new Promise(function (resolve, reject) {
+      if (!document || !document.createElement) { reject(new Error('no-dom')); return; }
       var cb = 'skRank' + (++seq) + '_' + (Date.now() % 1e6);
-      var url = ENDPOINT + (ENDPOINT.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + cb;
-      for (var k in params) {
-        if (params[k] == null) continue;
-        url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
-      }
+      var url = buildUrl(params, cb);
 
       var script = document.createElement('script');
       var settled = false;
