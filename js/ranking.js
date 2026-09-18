@@ -48,7 +48,11 @@ SK.Ranking = (function () {
     { key: 'score',    ko: '점수',      fmt: 'num', unit: '점',   topical: false },
     { key: 'solved',   ko: '맞힌 문제', fmt: 'num', unit: '문제', topical: true },
     { key: 'attempts', ko: '시도 문제', fmt: 'num', unit: '문제', topical: false },
-    { key: 'rate',     ko: '정답률',    fmt: 'pct', unit: '',     topical: true, gated: true }
+    { key: 'rate',     ko: '정답률',    fmt: 'pct', unit: '',     topical: true,  gated: true },
+    /* 밟기 정확도 — 글자 한 장 단위. 밟은 타일 중 순서에 맞았던 비율이다.
+       정답률이 '내용을 아는가'라면 이쪽은 '발을 정확히 디뎠는가'에 가깝다.
+       단원마다 따로 세지 않으므로 전체에서만 고를 수 있다. */
+    { key: 'accuracy', ko: '밟기 정확도', fmt: 'pct', unit: '',   topical: false, gated: true }
   ];
 
   function metric(key) {
@@ -239,6 +243,7 @@ SK.Ranking = (function () {
     list.push({
       nick: rec.nick, score: rec.score, timeMs: rec.timeMs,
       attempts: rec.attempts, solved: rec.solved,
+      hits: rec.hits, misses: rec.misses,
       topics: rec.topics || '', at: Date.now()
     });
     try { localStorage.setItem(LOCAL_KEY, JSON.stringify(list.slice(-LOCAL_MAX))); }
@@ -263,11 +268,13 @@ SK.Ranking = (function () {
   /** 여러 판을 닉네임 하나로 — 점수만 최고, 나머지는 누적 */
   function foldRuns(runs) {
     var agg = { nick: runs[0].nick, score: 0, attempts: 0, solved: 0,
-                topics: {}, runs: runs.length, at: 0 };
+                hits: 0, steps: 0, topics: {}, runs: runs.length, at: 0 };
     runs.forEach(function (r) {
       agg.score = Math.max(agg.score, +r.score || 0);
       agg.attempts += +r.attempts || 0;
       agg.solved += +r.solved || 0;
+      agg.hits += +r.hits || 0;
+      agg.steps += (+r.hits || 0) + (+r.misses || 0);
       agg.at = Math.max(agg.at, +r.at || 0);
       var t = parseTopics(r.topics);
       for (var k in t) {
@@ -277,6 +284,7 @@ SK.Ranking = (function () {
       }
     });
     agg.rate = agg.attempts ? agg.solved / agg.attempts : 0;
+    agg.accuracy = agg.steps ? agg.hits / agg.steps : 0;
     return agg;
   }
 
@@ -290,6 +298,7 @@ SK.Ranking = (function () {
     if (c.metric.key === 'score') value = agg.score;
     else if (c.metric.key === 'attempts') value = scope.a;
     else if (c.metric.key === 'solved') value = scope.s;
+    else if (c.metric.key === 'accuracy') value = agg.accuracy;
     else value = scope.a ? scope.s / scope.a : 0;
     return { value: value, eligible: eligible, tA: scope.a, tS: scope.s };
   }
@@ -307,6 +316,7 @@ SK.Ranking = (function () {
       rows.push({
         nick: agg.nick, value: v.value, score: agg.score,
         attempts: agg.attempts, solved: agg.solved, rate: agg.rate,
+        hits: agg.hits, steps: agg.steps, accuracy: agg.accuracy,
         tA: v.tA, tS: v.tS, runs: agg.runs, at: agg.at
       });
     }

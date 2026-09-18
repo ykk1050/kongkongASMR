@@ -102,7 +102,6 @@ body{
   max-height:calc(100vh - 80px - var(--st) - var(--sb));overflow-y:auto;overscroll-behavior:contain;
 }
 #menuPanel[hidden]{display:none}
-.menu-group{display:flex;gap:6px}
 .ctl{
   font-family:inherit;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer;
   background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);
@@ -290,6 +289,10 @@ body.no-pads #touchPad,body.no-pads #touchJump{display:none}
   display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
   margin:14px 0 4px;padding:0;
 }
+/* 여섯 칸짜리는 3열로 — 2열로 두면 카드가 한 줄만큼 더 길어진다 */
+.over-stats.six{grid-template-columns:repeat(3,1fr);gap:7px}
+.over-stats.six div{padding:8px 7px}
+.over-stats.six dd{font-size:17px}
 .over-stats div{
   padding:9px 10px;border-radius:13px;background:rgba(0,0,0,.26);
 }
@@ -390,6 +393,8 @@ body.no-pads #touchPad,body.no-pads #touchJump{display:none}
 
 @media (max-width:520px){
   .over-stats dd{font-size:17px}
+  .over-stats.six{grid-template-columns:repeat(2,1fr)}
+  .over-stats.six dd{font-size:16px}
   .rank-row{grid-template-columns:38px 1fr auto;font-size:12.5px}
   /* 좁은 화면에서는 검색칸을 한 줄 통째로 — 안 그러면 입력칸이 손톱만해진다 */
   .rank-search{flex-basis:100%}

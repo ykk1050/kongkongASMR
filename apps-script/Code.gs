@@ -377,7 +377,11 @@ function usedRunId(sh, runId) {
  *  키를 일일이 세는 대신 버전 번호를 올려 통째로 무효화한다.
  * ============================================================= */
 
-var METRIC_KEYS = { score: 1, solved: 1, attempts: 1, rate: 1 };
+var METRIC_KEYS = { score: 1, solved: 1, attempts: 1, rate: 1, accuracy: 1 };
+
+/* 단원별로 나눌 수 있는 지표. 점수·시도는 판 전체의 값이고,
+   밟기 정확도는 단원마다 따로 세지 않는다. */
+var TOPICAL = { solved: 1, rate: 1 };
 
 function parseCat(cat) {
   var s = String(cat || 'score');
@@ -385,11 +389,15 @@ function parseCat(cat) {
   var m = at < 0 ? s : s.slice(0, at);
   var t = at < 0 ? '' : s.slice(at + 1);
   if (!METRIC_KEYS[m]) { m = 'score'; t = ''; }
-  if (m === 'score' || m === 'attempts') t = '';   // 전체에서만 의미가 있는 지표
+  if (!TOPICAL[m]) t = '';
   return { metric: m, topic: t, key: t ? (m + '@' + t) : m };
 }
 
-function gateOf(c) { return (c.metric === 'rate' || c.topic) ? GATE : 0; }
+/* 비율로 재는 지표는 적게 풀수록 튄다 — 3문제 중 3개인 100%가 100문제 중
+   92개인 92%를 이기면 줄을 세우는 뜻이 없어진다. 그래서 시도 문제 수로 문턱을 둔다. */
+function gateOf(c) {
+  return (c.metric === 'rate' || c.metric === 'accuracy' || c.topic) ? GATE : 0;
+}
 
 function version() {
   return PropertiesService.getScriptProperties().getProperty('AGGVER') || '0';
@@ -424,11 +432,14 @@ function aggregate() {
 
       var a = byNick[nick];
       if (!a) a = byNick[nick] = { nick: nick, score: 0, attempts: 0, solved: 0,
-                                   topics: {}, runs: 0, at: 0 };
+                                   hits: 0, steps: 0, topics: {}, runs: 0, at: 0 };
       a.runs++;
       a.score = Math.max(a.score, Number(v[COL.score - 1]) || 0);
       a.attempts += Number(v[COL.attempts - 1]) || 0;
       a.solved += Number(v[COL.solved - 1]) || 0;
+      var hit = Number(v[COL.hits - 1]) || 0;
+      a.hits += hit;
+      a.steps += hit + (Number(v[COL.misses - 1]) || 0);
       var when = v[COL.at - 1] ? new Date(v[COL.at - 1]).getTime() : 0;
       if (when > a.at) a.at = when;
 
@@ -445,6 +456,7 @@ function aggregate() {
   for (var n in byNick) {
     var x = byNick[n];
     x.rate = x.attempts ? x.solved / x.attempts : 0;
+    x.accuracy = x.steps ? x.hits / x.steps : 0;
     list.push(x);
   }
   try { cache.put(key, JSON.stringify(list), CACHE_SEC); } catch (e) { /* 크면 캐시 없이 */ }
@@ -459,6 +471,7 @@ function valueOf(agg, c) {
   if (c.metric === 'score') value = agg.score;
   else if (c.metric === 'attempts') value = scope.a;
   else if (c.metric === 'solved') value = scope.s;
+  else if (c.metric === 'accuracy') value = agg.accuracy;
   else value = scope.a ? scope.s / scope.a : 0;
   return { value: value, eligible: g ? scope.a >= g : true, tA: scope.a, tS: scope.s };
 }
@@ -472,6 +485,7 @@ function ordered(cat, order) {
     rows.push({
       nick: agg.nick, value: v.value, score: agg.score,
       attempts: agg.attempts, solved: agg.solved, rate: agg.rate,
+      hits: agg.hits, steps: agg.steps, accuracy: agg.accuracy,
       tA: v.tA, tS: v.tS, runs: agg.runs, at: agg.at
     });
   });

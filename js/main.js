@@ -20,6 +20,8 @@
     overTime: $('overTime'),
     overSolved: $('overSolved'),
     overRate: $('overRate'),
+    overAccuracy: $('overAccuracy'),
+    overCombo: $('overCombo'),
     loadNote: $('loadNote'),
     // 게임 오버가 나면 게임 코어가 이 함수로 한 판의 기록을 넘겨준다
     onGameOver: function (rec, auth) { showRankForm(rec, auth); }
@@ -50,21 +52,6 @@
     if (menu.contains(e.target) || btnMenu.contains(e.target)) return;
     setMenu(false);
   });
-
-  /* ---------- 과목 필터 ---------- */
-  var subjectBtns = Array.prototype.slice.call(document.querySelectorAll('[data-subject]'));
-  function setActive(f) {
-    subjectBtns.forEach(function (b) { b.classList.toggle('active', b.dataset.subject === f); });
-  }
-  subjectBtns.forEach(function (b) {
-    b.addEventListener('click', function () {
-      SK.Audio.ui();
-      setActive(b.dataset.subject);
-      SK.Game.setSubject(b.dataset.subject);
-      setMenu(false);
-    });
-  });
-  setActive('all');
 
   /* ---------- 다음 문제 / 소리 / 조이스틱 ---------- */
   $('btnSkip').addEventListener('click', function () {
@@ -395,6 +382,10 @@
     if (rankTopic) {
       sub = '이 단원 ' + (r.tS || 0) + '/' + (r.tA || 0) +
             ' · 정답률 ' + SK.Ranking.fmtPct((r.tA ? r.tS / r.tA : 0));
+    } else if (rankMetric === 'accuracy') {
+      sub = '밟기 ' + (r.hits || 0) + '/' + (r.steps || 0) +
+            ' · 맞힘 ' + (r.solved || 0) + '/' + (r.attempts || 0) +
+            ' · 정답률 ' + SK.Ranking.fmtPct(r.rate || 0);
     } else {
       sub = '최고 ' + (r.score || 0) + '점' +
             ' · 맞힘 ' + (r.solved || 0) + '/' + (r.attempts || 0) +

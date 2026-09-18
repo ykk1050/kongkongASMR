@@ -1416,6 +1416,8 @@ SK.Game = (function () {
     if (ui.overTime) ui.overTime.textContent = SK.Ranking.fmtTime(rec.timeMs);
     if (ui.overSolved) ui.overSolved.textContent = rec.solved + ' / ' + rec.attempts;
     if (ui.overRate) ui.overRate.textContent = Math.round(rec.rate * 100) + '%';
+    if (ui.overAccuracy) ui.overAccuracy.textContent = Math.round(rec.accuracy * 100) + '%';
+    if (ui.overCombo) ui.overCombo.textContent = '×' + rec.maxCombo;
     if (ui.overPanel) ui.overPanel.hidden = false;
 
     // 랭킹 등록 화면은 main.js 가 맡는다 — 게임 코어는 값만 넘긴다
@@ -1900,14 +1902,6 @@ SK.Game = (function () {
   /* =========================================================
    *  외부 제어
    * ======================================================= */
-  function setSubject(f) {
-    if (!session) return;
-    session.setFilter(f);
-    if (!session.pool().length) { ui.prompt.textContent = '해당 단원의 문제가 없습니다.'; return; }
-    phase = 'play'; phaseTimer = 0;
-    nextQuiz();
-  }
-
   function skip() {
     if (!session) return;
     phase = 'play'; phaseTimer = 0;
@@ -1929,7 +1923,6 @@ SK.Game = (function () {
   var api = {
     boot: boot,
     startWith: startWith,
-    setSubject: setSubject,
     setDiag: setDiag, isDiag: isDiag,
     skip: skip,
     restart: restart,

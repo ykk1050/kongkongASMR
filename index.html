@@ -38,14 +38,10 @@
     <p id="hint" class="hint"></p>
   </header>
 
-  <!-- ====== 메뉴 (단원 필터 · 다음 문제 · 소리) ====== -->
+  <!-- ====== 메뉴 (다음 문제 · 랭킹 · 소리) ======
+       단원을 골라 푸는 기능은 일부러 두지 않는다. 문제는 언제나 전체에서
+       무작위로 나와야 모두가 같은 조건으로 겨룰 수 있다. -->
   <div id="menuPanel" hidden>
-    <div class="menu-group" role="group" aria-label="단원 선택">
-      <button class="ctl" data-subject="all">전체</button>
-      <button class="ctl" data-subject="선사·고조선">선사·고조선</button>
-      <button class="ctl" data-subject="삼국·가야">삼국·가야</button>
-      <button class="ctl" data-subject="생활·문화">생활·문화</button>
-    </div>
     <button class="ctl wide" id="btnSkip">다음 문제 ▸</button>
     <button class="ctl wide" id="btnRank">🏆 랭킹 보기</button>
     <button class="ctl wide" id="btnMute">🔊 소리 끄기</button>
@@ -89,10 +85,12 @@
       <div class="start-emoji">💔</div>
       <h2>게임 오버</h2>
 
-      <dl class="over-stats">
+      <dl class="over-stats six">
         <div><dt>점수</dt><dd id="overScore">0</dd></div>
         <div><dt>맞힘 / 시도</dt><dd id="overSolved">0 / 0</dd></div>
         <div><dt>정답률</dt><dd id="overRate">0%</dd></div>
+        <div><dt>밟기 정확도</dt><dd id="overAccuracy">0%</dd></div>
+        <div><dt>최대 콤보</dt><dd id="overCombo">×0</dd></div>
         <div><dt>플레이 시간</dt><dd id="overTime">0:00</dd></div>
       </dl>
 
