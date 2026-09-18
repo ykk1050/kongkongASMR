@@ -131,20 +131,20 @@
     setMenu(false);
   });
 
-  /* ---------- 소리 / 조이스틱 ---------- */
+  /* ---------- 소리 / 방향 패드 ---------- */
   var btnMute = $('btnMute');
   btnMute.addEventListener('click', function () {
     var m = SK.Audio.setMuted(!SK.Audio.isMuted());
     btnMute.textContent = m ? '🔇 소리 켜기' : '🔊 소리 끄기';
   });
 
-  // 조이스틱 표시 여부 — 터치 기기는 기본 켜짐, 마우스 전용 기기는 기본 꺼짐
+  // 방향 패드 표시 여부 — 터치 기기는 기본 켜짐, 마우스 전용 기기는 기본 꺼짐
   var touchCapable = (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
   var padsOn = touchCapable;
   var btnPads = $('btnPads');
   function applyPads() {
     document.body.classList.toggle('no-pads', !padsOn);
-    btnPads.textContent = padsOn ? '🎮 조이스틱 끄기' : '🎮 조이스틱 켜기';
+    btnPads.textContent = padsOn ? '🎮 방향 패드 끄기' : '🎮 방향 패드 켜기';
     SK.Game.relayout();      // 컨트롤이 사라지면 보드를 더 크게 그린다
   }
   btnPads.addEventListener('click', function () { SK.Audio.ui(); padsOn = !padsOn; applyPads(); });
@@ -519,7 +519,7 @@
 
   /* ---------- 퀴즈 데이터 로드 ---------- */
   SK.Quiz.load('data/quizzes.json').then(function (res) {
-    SK.Game.startWith(res.quizzes, res.source);
+    SK.Game.startWith(res.quizzes);
     step('이어하기 안내', refreshResumeUi);
     step('랭킹 탭', function () { buildTopicTabs(); buildMetricTabs(); syncTabs(); });
     report();

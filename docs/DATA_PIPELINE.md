@@ -218,7 +218,7 @@ SK.Quiz.load('data/quizzes.json')
 | `SK.Game.debug.state()` | 페이즈·FSM 상태·타일 목록(재질·균열 포함) |
 | `SK.Game.debug.stepOn(i, j, power)` | 해당 타일에 착지시켜 판정 발생. `power: 2` 면 큰 점프 |
 | `SK.Game.debug.tick(dt)` | 탭이 숨겨져 rAF가 멈춰도 한 프레임 진행(업데이트+렌더) |
-| `SK.Game.debug.safeRect()` | HUD·조이스틱을 뺀 보드 배치 영역 |
+| `SK.Game.debug.safeRect()` | HUD·방향 패드를 뺀 보드 배치 영역 |
 | `SK.Game.debug.boardBounds()` | 실제로 그려진 보드의 화면 경계(겹침 자동 점검용) |
 
 ### 타일 재질과 파괴 단계

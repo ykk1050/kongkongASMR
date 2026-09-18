@@ -2,7 +2,7 @@
  *  소리 콩콩 — 게임 코어
  *  · 타일이 한 칸씩 떨어져 떠 있고, 캐릭터는 한 칸씩 점프해 이동한다
  *  · 소리와 시각 효과가 항상 짝을 이룬다
- *  · HUD / 조이스틱 / 보드가 서로 겹치지 않도록 안전 영역을 계산해 배치한다
+ *  · HUD / 방향 패드 / 보드가 서로 겹치지 않도록 안전 영역을 계산해 배치한다
  * ============================================================= */
 window.SK = window.SK || {};
 
@@ -184,7 +184,7 @@ SK.Game = (function () {
    *  그래서 시간이 아니라 **기회**로 센다 — 요청은 플레이어가 실제로 뛸 수 있게 되는
    *  프레임까지 살아 있고, 그 프레임에 소비된다(뛰었든, 갈 수 없는 방향이라 튕겼든).
    *  못 뛰는 동안에는 아무리 오래여도 유지되므로 입력이 사라지지 않는다.
-   *  (조이스틱 '쿵' 버튼에도 똑같이 걸린다.) */
+   *  (화면의 '점프' 버튼에도 똑같이 걸린다.) */
   var JUMP_STALE_MS = 900;          // 탭이 멈춰 있었을 때를 대비한 안전장치
 
   /* 제자리 내려찍기로 확정하기 전에 방향을 기다려 주는 시간.
@@ -378,10 +378,9 @@ SK.Game = (function () {
    * ======================================================= */
   var resumed = false;
 
-  function startWith(quizzes, sourceLabel) {
+  function startWith(quizzes) {
     session = SK.Quiz.createSession(quizzes);
     fsm = SK.Quiz.createMachine();
-    if (ui.loadNote) ui.loadNote.textContent = '문제 ' + quizzes.length + '개 · ' + sourceLabel;
 
     /* 하던 판이 남아 있으면 먼저 되살린다. 시작 화면 뒤로 그 판이 그대로
        보이므로, 플레이어는 '이어하기'와 '새로 시작' 중에 고르기만 하면 된다. */
@@ -838,7 +837,6 @@ SK.Game = (function () {
 
   /** 축마다 따로 값을 정한다 — 반대 방향이 누적돼 조준이 0에 갇히지 않게 */
   function syncKeyDir() {
-    if (padActive) return;                 // 조이스틱 입력이 우선
     var tnow = performance.now();
     // 누르고 있는 키가 있으면 톡 기억의 수명을 계속 갱신한다 — 누른 채로 있는 동안
     // 조준이 저절로 풀리지 않게, 그리고 keyup 이 유실돼도 곧바로 무너지지 않게
@@ -851,108 +849,108 @@ SK.Game = (function () {
   }
 
   /* =========================================================
-   *  입력 — 가상 조이스틱 / 점프 버튼 (Pointer Events)
+   *  입력 — 방향 패드 / 점프 버튼 (Pointer Events)
    *  터치·마우스·스타일러스를 같은 코드로 처리한다.
    * ======================================================= */
-  var padActive = false;
-  var padAimEl = null;
 
-  /* 조이스틱 조작감을 좌우하는 값들.
+  /* 예전에는 플로팅 아날로그 스틱이었다. 원점이 손가락을 따라다니고 데드존과
+   * 평활이 걸려 있어서, "가고 싶은 칸"과 "스틱이 가리키는 각도"가 자꾸 어긋났다.
+   * 조준만 하는 게임이라 그 어긋남이 그대로 오조준이 된다.
    *
-   *  · 원점은 패드 한가운데가 아니라 **손가락이 처음 닿은 자리**다(플로팅 스틱).
-   *    고정 원점이면 패드 가장자리를 짚는 순간 그 방향이 곧바로 입력돼서,
-   *    "잡자마자 엉뚱한 데를 조준한다"가 된다.
-   *  · 손가락이 반경 밖으로 나가면 원점이 따라가며(리센터) 스틱이 계속 살아 있다.
-   *  · 데드존은 픽셀이 아니라 반경 비율로 잡는다 — 화면 크기가 달라도 감이 같다.
+   * 그래서 **누르는 자리가 곧 방향**인 마름모 패드로 바꿨다. 끌 필요도, 원점을
+   * 잡을 필요도 없다. 화살표 칸을 누르면 그 방향, 두 칸 사이 모서리를 누르면
+   * 대각선이다.
+   *
+   * 여덟 방향을 다 낼 수 있어야 한다 — 판의 연결성(allConnected)과 길 판정
+   * (roadOk)이 8방향 이웃으로 정의돼 있어서, 네 방향만 낼 수 있으면 대각선으로만
+   * 닿는 글자가 생겨 "답을 못 밟는 판"이 만들어진다.
+   *
+   * 다만 섹터를 45°씩 똑같이 나누면 화살표 한가운데를 눌러도 가장자리에서 대각선이
+   * 튀어나온다 — 스틱이 어려웠던 이유와 같은 문제다. 그래서 **화살표 쪽을 넓게**
+   * (60°), 모서리를 좁게(30°) 잡았다. 눈에 보이는 칸 크기와 손끝의 판정이 같아진다.
    */
-  var DEAD = 0.26;          // 반경 대비 데드존
-  var SMOOTH = 0.45;        // 방향 벡터 지수 평활 — 손 떨림을 걸러 낸다
+  var CARDINAL_HALF = 30 * Math.PI / 180;   // 화살표 섹터의 반각
+
+  var DPAD_KEYS = ['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'];
+
+  /**
+   * 패드 중심에서 손가락까지의 각도를 방향 키 집합으로 바꾼다.
+   * @returns {string[]} 눌린 것으로 칠 방향 키 (한 개=화살표, 두 개=대각선)
+   */
+  function dpadKeysAt(dx, dy) {
+    if (!dx && !dy) return [];
+    // 화면 위(-y)를 0으로 두고 시계 방향으로 잰다 — 위·오른쪽·아래·왼쪽 순서
+    var a = Math.atan2(dx, -dy);
+    if (a < 0) a += Math.PI * 2;
+    var quarter = Math.PI / 2;
+    for (var k = 0; k < 4; k++) {
+      var d = Math.abs(a - k * quarter);
+      if (d > Math.PI) d = Math.PI * 2 - d;
+      if (d <= CARDINAL_HALF) return [DPAD_KEYS[k]];
+    }
+    // 화살표 섹터에 들지 않았으면 모서리 — 양옆 두 개를 함께 누른 것으로 친다
+    var side = Math.floor(a / quarter) % 4;
+    return [DPAD_KEYS[side], DPAD_KEYS[(side + 1) % 4]];
+  }
 
   function bindVirtualControls() {
-    var pad = document.getElementById('touchPad');
-    var nub = document.getElementById('touchNub');
+    var pad = document.getElementById('touchDpad');
     var jmp = document.getElementById('touchJump');
     if (!pad || !jmp) return;
-    padAimEl = document.getElementById('touchAim');
 
-    var padId = null, cx = 0, cy = 0, radius = 46;
-    var sx = 0, sy = 0;                              // 평활된 방향 벡터
+    var keyEls = {};
+    var els = pad.querySelectorAll('.dkey');
+    for (var n = 0; n < els.length; n++) keyEls[els[n].getAttribute('data-dir')] = els[n];
 
-    function updateFrom(e) {
-      var dx = e.clientX - cx, dy = e.clientY - cy;
-      var len = Math.hypot(dx, dy);
+    var padId = null;
 
-      // 반경을 넘어가면 원점을 끌고 간다 — 손가락이 패드 밖으로 나가도 계속 조작된다
-      if (len > radius) {
-        var over = (len - radius) / len;
-        cx += dx * over; cy += dy * over;
-        dx -= dx * over; dy -= dy * over;
-        len = radius;
+    /** 방향 키를 실제 키보드와 같은 경로로 흘려보낸다 — 톡 기억·대각선 합성이 그대로 쓰인다 */
+    function setKeys(list) {
+      var tnow = performance.now();
+      var changed = false;
+      for (var k = 0; k < DPAD_KEYS.length; k++) {
+        var code = DPAD_KEYS[k], on = list.indexOf(code) >= 0;
+        if (!!input.keys[code] !== on) changed = true;
+        input.keys[code] = on;
+        if (keyEls[code]) keyEls[code].classList.toggle('on', on);
       }
-
-      nub.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
-
-      var mag = len / radius;
-      if (mag < DEAD) {
-        sx = sy = 0;
-        input.dx = 0; input.dy = 0;
-        if (padAimEl) padAimEl.style.opacity = '0';
-        return;
+      if (list.length && changed) {
+        // 한참 쉬었다 누른 것이면 이전 조준은 버린다 (키보드와 같은 규칙)
+        if (tnow - lastDirAt > CHAIN_MS) { tapX.code = null; tapY.code = null; }
+        for (var m = 0; m < list.length; m++) {
+          if (KEYDIR[list[m]][0]) tapX.code = list[m];
+          if (KEYDIR[list[m]][1]) tapY.code = list[m];
+        }
+        lastDirAt = tnow;
+        if (diagEl) pushDiag('down', list.join('+'));
       }
-      // 데드존 바깥을 0~1로 다시 펼친다(데드존 경계에서 값이 튀지 않게)
-      var k = (mag - DEAD) / (1 - DEAD) / len;
-      var tx = dx * k, ty = dy * k;
-      sx += (tx - sx) * SMOOTH;
-      sy += (ty - sy) * SMOOTH;
-      input.dx = sx; input.dy = sy;
-      showPadAim(radius);
+      syncKeyDir();
     }
 
-    /** 스틱이 어느 칸으로 확정됐는지 패드 위에 점으로 보여 준다 */
-    function showPadAim(r) {
-      if (!padAimEl) return;
-      var dir = SK.Player.quantize(input.dx, input.dy, player && player.aimDir);
-      if (!dir) { padAimEl.style.opacity = '0'; return; }
-      var ax = (dir.di - dir.dj) * (SK.Iso.TW / 2);
-      var ay = (dir.di + dir.dj) * (SK.Iso.TH / 2);
-      var n = Math.hypot(ax, ay) || 1;
-      padAimEl.style.opacity = '1';
-      padAimEl.style.transform =
-        'translate(' + (ax / n * r * 0.92) + 'px,' + (ay / n * r * 0.92) + 'px)';
+    function aimFrom(e) {
+      var r = pad.getBoundingClientRect();
+      setKeys(dpadKeysAt(e.clientX - (r.left + r.width / 2),
+                         e.clientY - (r.top + r.height / 2)));
     }
 
     pad.addEventListener('pointerdown', function (e) {
       e.preventDefault();
       padId = e.pointerId;
-      padActive = true;
       try { pad.setPointerCapture(e.pointerId); } catch (_) { }
-      var r = pad.getBoundingClientRect();
-      radius = r.width * 0.42;
-      // 짚은 자리를 원점으로. 단, 패드 밖(확장 히트영역)을 짚었다면 가운데로 당겨 둔다.
-      var mx = r.left + r.width / 2, my = r.top + r.height / 2;
-      var ox = e.clientX - mx, oy = e.clientY - my;
-      var od = Math.hypot(ox, oy);
-      var pull = od > radius ? radius / od : 1;
-      cx = mx + ox * pull; cy = my + oy * pull;
-      sx = sy = 0;
-      input.dx = 0; input.dy = 0;
-      nub.style.transform = 'translate(' + (cx - mx) + 'px,' + (cy - my) + 'px)';
-      pad.classList.add('active');
+      aimFrom(e);
     });
     pad.addEventListener('pointermove', function (e) {
       if (e.pointerId !== padId) return;
       e.preventDefault();
-      updateFrom(e);
+      aimFrom(e);                       // 누른 채로 문질러 방향을 바꿀 수 있다
     });
     function endPad(e) {
       if (padId !== null && e.pointerId !== padId) return;
-      padId = null; padActive = false;
-      sx = sy = 0;
-      input.dx = 0; input.dy = 0;
-      nub.style.transform = '';
-      if (padAimEl) padAimEl.style.opacity = '0';
-      pad.classList.remove('active');
-      syncKeyDir();
+      padId = null;
+      /* 키만 떼고 **톡 기억은 남긴다.** 방향 패드는 손가락이 하나뿐인 경우가 많아서,
+         방향을 누른 뒤 점프를 누르는 사이에 조준이 풀리면 아무 데도 못 간다.
+         (키보드에서 방향키를 톡 치고 Space 를 누르는 것과 같은 동작이다) */
+      setKeys([]);
     }
     pad.addEventListener('pointerup', endPad);
     pad.addEventListener('pointercancel', endPad);
@@ -980,7 +978,7 @@ SK.Game = (function () {
     var hud = ui.hud && ui.hud.getBoundingClientRect();
     if (hud && hud.height) top = hud.bottom + 6;
 
-    var padEl = document.getElementById('touchPad');
+    var padEl = document.getElementById('touchDpad');
     var jmpEl = document.getElementById('touchJump');
     var visible = padEl && padEl.offsetParent !== null;
 

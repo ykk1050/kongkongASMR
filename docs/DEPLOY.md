@@ -119,5 +119,7 @@ Pages 는 `https://<계정>.github.io/<저장소>/` 처럼 **하위 경로**로 
 - [ ] `python tools/build-fallback.py` 가 에러 없이 끝난다
 - [ ] 로컬 서버(`python -m http.server 5178`)에서 문제 풀이가 정상 동작한다
 - [ ] 브라우저 콘솔에 404 나 에러가 없다
-- [ ] 태블릿 가로/세로 폭에서 조이스틱이 문제나 보드를 가리지 않는다
+- [ ] 태블릿 가로/세로 폭에서 방향 패드가 문제나 보드를 가리지 않는다
+- [ ] 화면 맨 아래 `Created by gamtudyssam using AI · 0.000XX` 가 컨트롤에 가리지 않는다
+      (버전은 내보낼 때마다 `python tools/stamp.py --bump` 으로 0.00001 올린다)
 - [ ] `index.html` 을 더블클릭한 `file://` 실행도 동작한다(폴백 데이터 확인)
