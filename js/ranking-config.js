@@ -10,7 +10,7 @@
  * ============================================================= */
 window.SK_RANKING = {
   /** 배포한 Apps Script 웹 앱 주소. 예: 'https://script.google.com/macros/s/AKfy.../exec' */
-  endpoint: 'https://script.google.com/macros/s/AKfycbxxqOWTrKRDbV3oKUdRz2o8mLctb8I72XDuc68hZk589w2tXLb1O1MjUT9KOs1KT89Z/exec',
+  endpoint: 'https://script.google.com/macros/s/AKfycbwG-QLd7gGZML27T4vJ808HKVvvo57TNV7Okvh4oQM1ZwnHw9JFBycG6DZz4QhKjoBABg/exec',
 
   /** 랭킹 기능 자체를 끄고 싶을 때 false */
   enabled: true
