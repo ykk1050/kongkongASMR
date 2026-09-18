@@ -39,6 +39,76 @@ SK.Game = (function () {
   var running = false, lastT = 0, now = 0;
   var score = 0, combo = 0, streak = 0;
 
+  /* 한 판의 기록.
+ *
+ *  랭킹은 점수 하나로만 줄을 세우지 않는다 — 오래 버틴 사람, 많이 맞힌 사람,
+ *  적게 틀린 사람이 각각 보이도록 여러 조건으로 집계한다. 그래서 판이 끝날 때
+ *  필요한 값을 처음부터 모아 둔다.
+ *
+ *  ⚠ 이 값들은 전부 이 클로저 안에만 있다. window 나 SK.Game 어디에도
+ *    붙이지 않으므로 개발자 도구 콘솔에서 점수 변수를 직접 고칠 수 없다.
+ *    (남은 구멍 — 게임 파일 자체를 고친 경우 — 은 서버 쪽 타당성 검사가 맡는다) */
+  var RUN_VER = '1';
+  var run = null;
+  var runAuth = null;          // 서버가 발급한 1회용 실행 토큰
+
+  function resetRun() {
+    run = {
+      startedAt: Date.now(),
+      timeMs: 0,               // 실제로 논 시간 — 탭이 숨으면 같이 멈춘다
+      solved: 0,               // 끝까지 맞힌 문제 수
+      hits: 0,                 // 순서에 맞게 밟은 글자 수
+      misses: 0,               // 틀리게 밟은 횟수
+      falls: 0,                // 빈 칸·부서진 자리로 떨어진 횟수
+      maxCombo: 0,
+      quizzes: 0,              // 받아 본 문제 수
+      tainted: false           // 개발자용 훅을 쓴 판 — 랭킹에 올리지 않는다
+    };
+  }
+  resetRun();
+
+  /* 서버가 토큰을 받아 주는 기한보다 넉넉히 앞서 새로 받는다 */
+  var TOKEN_REFRESH_MS = 10 * 3600 * 1000;
+
+  function tokenTooOld(token) {
+    var parts = String(token || '').split('.');
+    if (parts.length !== 3) return true;
+    var at = parseInt(parts[1], 36);
+    return !(at > 0) || (Date.now() - at) > TOKEN_REFRESH_MS;
+  }
+
+  /** 판이 시작될 때 서버에서 1회용 토큰을 받아 둔다 (없어도 게임은 그대로 진행) */
+  function beginRun() {
+    runAuth = null;
+    if (!SK.Ranking || !SK.Ranking.startRun) return;
+    SK.Ranking.startRun().then(function (r) { runAuth = r; });
+  }
+
+  /** 랭킹에 올릴 한 판의 요약 */
+  function getRunRecord() {
+    var tries = run.hits + run.misses;
+    return {
+      score: score,
+      timeMs: Math.round(run.timeMs),
+      solved: run.solved,
+      hits: run.hits,
+      misses: run.misses,
+      falls: run.falls,
+      maxCombo: run.maxCombo,
+      quizzes: run.quizzes,
+      grid: GRID,
+      accuracy: tries ? run.hits / tries : 0,
+      /* 벽시계로 잰 시간. 서버는 '논 시간이 실제로 흐른 시간보다 길 수는 없다'는
+         것만 본다 — 잠시 자리를 비워 벽시계가 훨씬 길어지는 것은 정상이다. */
+      wallMs: Math.max(0, Date.now() - run.startedAt),
+      tainted: !!run.tainted,
+      ver: RUN_VER
+    };
+  }
+
+  /** 개발자용 훅을 쓴 판은 토큰을 내주지 않는다 → 이 기기 기록으로만 남는다 */
+  function getRunAuth() { return run.tainted ? null : runAuth; }
+
   /* 목숨.
    *
    *  잃는 경우는 셋이고, 셋 다 "발밑이 무너지거나 길을 잘못 들었다"는 같은 종류의
@@ -111,6 +181,7 @@ SK.Game = (function () {
     if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
     bindKeys();
     bindVirtualControls();
+    bindSaveHooks();
   }
 
   /** 화면 크기에 맞춰 격자 크기를 고른다 (타일이 잘리지 않도록) */
@@ -213,22 +284,43 @@ SK.Game = (function () {
   /* =========================================================
    *  퀴즈
    * ======================================================= */
+  var resumed = false;
+
   function startWith(quizzes, sourceLabel) {
     session = SK.Quiz.createSession(quizzes);
     fsm = SK.Quiz.createMachine();
     if (ui.loadNote) ui.loadNote.textContent = '문제 ' + quizzes.length + '개 · ' + sourceLabel;
-    nextQuiz();
+
+    /* 하던 판이 남아 있으면 먼저 되살린다. 시작 화면 뒤로 그 판이 그대로
+       보이므로, 플레이어는 '이어하기'와 '새로 시작' 중에 고르기만 하면 된다. */
+    resumed = false;
+    var snap = SK.Save ? SK.Save.read() : null;
+    if (snap) {
+      try { resumed = applySave(snap); }
+      catch (e) { resumed = false; if (window.console) console.warn('[save] 되살리지 못함', e); }
+    }
+    if (!resumed) {
+      if (SK.Save) SK.Save.clear();
+      resetRun();
+      beginRun();
+      nextQuiz();
+    }
     if (!running) { running = true; lastT = performance.now(); requestAnimationFrame(loop); }
   }
+
+  /** 되살린 판으로 시작했는가 — 시작 화면이 버튼을 고르는 데 쓴다 */
+  function canResume() { return resumed; }
 
   function nextQuiz() {
     var q = session.next();
     if (!q) { ui.prompt.textContent = '해당 과목의 문제가 없습니다.'; return; }
+    run.quizzes++;
     fsm.setQuiz(q);
     layoutQuiz(q);
     phase = 'play';
     SK.Audio.newQuiz();
     renderHUD(true);
+    saveNow(true);
   }
 
   /** 문제 타일을 바닥에 뿌린다 — 밟힌 흔적과 균열은 그대로 둔다 */
@@ -942,6 +1034,10 @@ SK.Game = (function () {
       if (flash > 0) flash = Math.max(0, flash - dt * 2.6);
       return;
     }
+    /* 플레이 시간. 탭을 숨기거나 창을 옮기면 requestAnimationFrame 이 멈추므로
+       시계도 저절로 같이 멈춘다 — 켜 두고 자리를 비운 시간은 세지 않는다. */
+    run.timeMs += dt * 1000;
+
     if (phaseTimer > 0) {
       phaseTimer -= dt;
       if (phaseTimer <= 0) {
@@ -982,6 +1078,7 @@ SK.Game = (function () {
 
     for (var i = 0; i < tiles.length; i++) SK.Tiles.update(tiles[i], dt);
     updateAim(dt);
+    if (player.justLanded) saveNow();
 
     // 카메라 — 보드 중심에서 캐릭터 쪽으로 조금만 따라간다
     var bc = world((GRID - 1) / 2, (GRID - 1) / 2, 0);
@@ -1190,6 +1287,7 @@ SK.Game = (function () {
     // 마지막 글자를 밟은 순간 발판이 무너질 수도 있다 — 그때는 완성 연출을 지키게 둔다
     if (phase === 'play') { phase = 'wrong'; phaseTimer = 1.0; }
     streak = 0; combo = 0;
+    run.falls++;
     score = Math.max(0, score - FALL_PENALTY);
 
     var pan = panOf(i, j);
@@ -1247,7 +1345,7 @@ SK.Game = (function () {
       ui.hearts.classList.add('hit');
     }
     if (lives <= 0) gameOver();
-    else renderLives();
+    else { renderLives(); saveNow(true); }
   }
 
   function renderLives() {
@@ -1272,8 +1370,20 @@ SK.Game = (function () {
     cam.shake = 1.0;
     setFlash(0.5, 352);
     SK.Player.stun(player, 99);            // 게임 오버 동안에는 움직이지 않는다
+
+    /* 끝난 판은 이어할 수 없다 — 저장을 지우지 않으면 다음에 들어왔을 때
+       목숨 0짜리 판이 되살아난다. */
+    if (SK.Save) SK.Save.clear();
+
+    var rec = getRunRecord();
     if (ui.overScore) ui.overScore.textContent = score;
+    if (ui.overTime) ui.overTime.textContent = SK.Ranking.fmtTime(rec.timeMs);
+    if (ui.overSolved) ui.overSolved.textContent = rec.solved;
+    if (ui.overAccuracy) ui.overAccuracy.textContent = Math.round(rec.accuracy * 100) + '%';
     if (ui.overPanel) ui.overPanel.hidden = false;
+
+    // 랭킹 등록 화면은 main.js 가 맡는다 — 게임 코어는 값만 넘긴다
+    if (typeof ui.onGameOver === 'function') ui.onGameOver(rec, getRunAuth());
   }
 
   /** 처음부터 다시 — 점수·목숨·보드·문제를 전부 새로 만든다 */
@@ -1281,9 +1391,13 @@ SK.Game = (function () {
     if (ui.overPanel) ui.overPanel.hidden = true;
     score = 0; combo = 0; streak = 0;
     lives = MAX_LIVES;
+    resetRun();
+    beginRun();
+    if (SK.Save) SK.Save.clear();
     renderLives();
 
     SK.Particles.clear();
+    pickGrid();
     buildWorld();
     player = SK.Player.create(START.i, START.j);
     player.surface = player.surfaceTarget = worldApi.surfaceOf(START.i, START.j);
@@ -1291,9 +1405,203 @@ SK.Game = (function () {
     cam.shake = 0; flash = 0;
 
     phase = 'play'; phaseTimer = 0;
+    resumed = false;
     if (fsm) fsm.reset && fsm.reset();
+    if (session) session.setFilter(session.filter);   // 문제 차례를 새로 섞는다
     nextQuiz();
     resize();
+  }
+
+  /* =========================================================
+   *  이어하기 — 판을 통째로 담고 되살린다
+   *
+   *  담는 것은 "판의 사진" 한 장이다. 점수·목숨·시간, 타일 하나하나의 재질과
+   *  닳은 정도, 글자 배치, 지금 문제와 어디까지 밟았는지, 앞으로 나올 문제
+   *  차례, 캐릭터가 선 자리.
+   *
+   *  ⚠ 타일 목록에 없는 칸이 곧 구멍이다. 구멍을 따로 적지 않는다.
+   *  ⚠ 진행 중 연출(phase 'wrong'·'solved', 도약 중, 화면 흔들림)은 담지 않는다.
+   *    되살아난 판은 언제나 조용한 'play' 상태에서 다시 시작한다 — 애매한
+   *    중간 상태를 복원하려다 반쯤 끝난 연출에 갇히는 쪽이 훨씬 나쁘다.
+   * ======================================================= */
+  var SAVE_THROTTLE_MS = 900;
+  var lastSaveAt = -1e9;
+
+  function captureSave() {
+    if (!fsm || !fsm.quiz || !session || !player) return null;
+    if (phase === 'over' || lives <= 0) return null;
+
+    var ts = [];
+    for (var k = 0; k < tiles.length; k++) {
+      var t = tiles[k];
+      ts.push({
+        i: t.i, j: t.j, m: t.mat,
+        d: t.damage | 0, b: +(t.broken || 0).toFixed(3),
+        s: t.state, r: t.role, l: t.label, p: t.payload,
+        o: t.order, c: t.correct ? 1 : 0,
+        mk: +(t.mark || 0).toFixed(2), mx: +(t.markX || 0).toFixed(2),
+        my: +(t.markY || 0).toFixed(2), tl: +(t.tilt || 0).toFixed(3),
+        sd: +(t.seed || 0).toFixed(4)
+      });
+    }
+
+    var queue = [];
+    for (var n = 0; n < session.queue.length; n++) queue.push(session.queue[n].id);
+
+    return {
+      grid: GRID, start: { i: START.i, j: START.j },
+      score: score, combo: combo, streak: streak, lives: lives,
+      timeMs: Math.round(run.timeMs),
+      run: {
+        startedAt: run.startedAt, solved: run.solved, hits: run.hits,
+        misses: run.misses, falls: run.falls, maxCombo: run.maxCombo,
+        quizzes: run.quizzes, tainted: run.tainted ? 1 : 0
+      },
+      auth: runAuth,
+      quizId: fsm.quiz.id,
+      progress: fsm.progress.slice(),
+      attempts: fsm.attempts, mistakes: fsm.mistakes,
+      filter: session.filter,
+      queue: queue,
+      player: { i: player.ci, j: player.cj },
+      tiles: ts
+    };
+  }
+
+  /**
+   * 저장을 기록한다.
+   * @param {boolean} force 조절 간격을 무시하고 지금 바로 (문제가 바뀌거나 목숨을
+   *                        잃은 순간처럼 놓치면 안 되는 지점)
+   */
+  function saveNow(force) {
+    if (!SK.Save || !SK.Save.available()) return false;
+    var t = performance.now();
+    if (!force && t - lastSaveAt < SAVE_THROTTLE_MS) return false;
+    var snap = captureSave();
+    if (!snap) return false;
+    lastSaveAt = t;
+    return SK.Save.write(snap);
+  }
+
+  /**
+   * 저장된 판을 되살린다.
+   * @returns {boolean} 되살렸는가. 문제집이 바뀌었거나 판이 앞뒤가 맞지 않으면
+   *                    false — 그때는 호출한 쪽이 새 판을 시작한다.
+   */
+  function applySave(snap) {
+    if (!snap || !session || !fsm) return false;
+
+    // 저장된 문제가 지금 문제집에 있는가 (문제를 갈아 끼웠을 수 있다)
+    var pool = session.all, byId = Object.create(null), i, k, n;
+    for (i = 0; i < pool.length; i++) byId[pool[i].id] = pool[i];
+    var q = byId[snap.quizId];
+    if (!q) return false;
+
+    // 밟아 온 순서가 그 문제의 정답과 실제로 맞는가
+    var prog = Array.isArray(snap.progress) ? snap.progress : [];
+    if (prog.length >= q.sequence.length) return false;
+    for (i = 0; i < prog.length; i++) if (q.sequence[i] !== prog[i]) return false;
+
+    if (!(snap.grid >= 3 && snap.grid <= 12)) return false;
+
+    /* 저장된 격자 크기를 그대로 쓴다. 휴대폰에서 하던 판을 PC 에서 열어도
+       같은 판이어야 한다 — 화면에 맞추는 일은 resize() 의 배율이 맡는다. */
+    GRID = snap.grid;
+    START = { i: snap.start.i, j: snap.start.j };
+
+    tiles = []; tileAt = {}; quizTiles = [];
+    for (n = 0; n < snap.tiles.length; n++) {
+      var d = snap.tiles[n];
+      if (!inBounds(d.i, d.j)) continue;
+      if (tileAt[d.i + ',' + d.j]) continue;              // 같은 칸이 두 번 오면 무시
+      var t = SK.Tiles.make(d.i, d.j, d.m);
+      t.damage = d.d | 0;
+      t.broken = Math.max(0, Math.min(1, +d.b || 0));
+      t.state = (d.s === 'done' || d.s === 'wrong') ? d.s : 'idle';
+      t.role = d.r === 'seq' ? 'seq' : 'plain';
+      t.label = d.l == null ? null : String(d.l);
+      t.payload = d.p == null ? null : String(d.p);
+      t.order = d.o == null ? -1 : (d.o | 0);
+      t.correct = !!d.c;
+      t.mark = +d.mk || 0; t.markX = +d.mx || 0; t.markY = +d.my || 0;
+      t.tilt = +d.tl || 0;
+      if (d.sd != null) t.seed = +d.sd;
+      if (t.damage > 0) SK.Tiles.rebuildCracks(t);
+      tiles.push(t);
+      tileAt[t.i + ',' + t.j] = t;
+      if (t.role === 'seq' && t.label) quizTiles.push(t);
+    }
+    if (!tiles.length) return false;
+
+    // 문제 차례 — 저장된 순서 그대로 이어 간다
+    session.setFilter(typeof snap.filter === 'string' ? snap.filter : 'all');
+    var queue = [];
+    if (Array.isArray(snap.queue)) {
+      for (n = 0; n < snap.queue.length; n++) {
+        if (byId[snap.queue[n]]) queue.push(byId[snap.queue[n]]);
+      }
+    }
+    session.queue = queue;
+    session.current = q;
+
+    fsm.setQuiz(q);
+    fsm.progress = prog.slice();
+    fsm.attempts = snap.attempts | 0;
+    fsm.mistakes = snap.mistakes | 0;
+
+    score = Math.max(0, snap.score | 0);
+    combo = Math.max(0, Math.min(9, snap.combo | 0));
+    streak = Math.max(0, snap.streak | 0);
+    lives = Math.max(1, Math.min(MAX_LIVES, snap.lives | 0));
+
+    resetRun();
+    var r = snap.run || {};
+    run.startedAt = r.startedAt || Date.now();
+    run.timeMs = Math.max(0, +snap.timeMs || 0);
+    run.solved = r.solved | 0; run.hits = r.hits | 0; run.misses = r.misses | 0;
+    run.falls = r.falls | 0; run.maxCombo = r.maxCombo | 0; run.quizzes = r.quizzes | 0;
+    run.tainted = !!r.tainted;
+
+    /* 실행 토큰은 판에 붙어 있다 — 이어한 판도 같은 한 판이므로 그대로 쓴다.
+       다만 며칠 뒤에 이어 받으면 서버가 낡은 토큰을 받아 주지 않으므로
+       그럴 때는 새로 받아 둔다. (토큰 가운데 토막이 발급 시각, 36진수) */
+    runAuth = snap.auth || null;
+    if (!runAuth || tokenTooOld(runAuth.token)) beginRun();
+
+    // 캐릭터 — 서 있던 자리가 사라졌으면 가장 가까운 성한 발판으로
+    var pi = snap.player ? snap.player.i : START.i;
+    var pj = snap.player ? snap.player.j : START.j;
+    if (!SK.Tiles.isSolid(getTile(pi, pj))) {
+      var back = nearestSolid(pi, pj);
+      pi = back.i; pj = back.j;
+    }
+    player = SK.Player.create(pi, pj);
+    player.surface = player.surfaceTarget = worldApi.surfaceOf(pi, pj);
+
+    /* 되살린 판에 다음에 밟을 글자가 실제로 놓여 있어야 한다. 저장이 어긋났거나
+       그 칸이 부서진 채로 저장됐다면 문제를 영영 풀 수 없으므로 다시 깐다. */
+    var need = fsm.expected(), found = false;
+    for (k = 0; k < quizTiles.length; k++) {
+      if (quizTiles[k].payload === need && SK.Tiles.isSolid(quizTiles[k])) { found = true; break; }
+    }
+    if (!found) layoutQuiz(q);
+
+    SK.Particles.clear();
+    cam.shake = 0; flash = 0;
+    phase = 'play'; phaseTimer = 0;
+    renderHUD(true);
+    resize();
+    return true;
+  }
+
+  /* 화면을 옮기거나 탭을 닫는 순간을 붙잡는다. pagehide 는 모바일 사파리에서
+     unload 가 오지 않는 경우까지 덮는다. */
+  function bindSaveHooks() {
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') saveNow(true);
+    });
+    window.addEventListener('pagehide', function () { saveNow(true); });
+    window.addEventListener('beforeunload', function () { saveNow(true); });
   }
 
   /* =========================================================
@@ -1323,6 +1631,8 @@ SK.Game = (function () {
       streak++;
       combo = Math.min(9, 1 + Math.floor(streak / 4));
       score += 10 * combo;
+      run.hits++;
+      if (combo > run.maxCombo) run.maxCombo = combo;
       if (r.type === 'solved') onSolved(t, pan);
       renderHUD();
     } else if (r.type === 'wrong') {
@@ -1336,6 +1646,7 @@ SK.Game = (function () {
     phase = 'solved';
     phaseTimer = 2.1;
     score += 50 * combo;
+    run.solved++;
     SK.Particles.celebrate(t.i, t.j);
     setFlash(0.55, 148);
     SK.Particles.text(t.i, t.j, 'CRACKLE-POP!', { size: 32, color: '#ffd66b', gz: 0.9, life: 1.4 });
@@ -1359,6 +1670,7 @@ SK.Game = (function () {
     t.state = 'wrong';
     streak = 0; combo = 0;
     score = Math.max(0, score - 5);
+    run.misses++;
     SK.Audio.wrong({ pan: pan });
     SK.Particles.text(t.i, t.j, 'THUD…', { size: 24, color: '#ff9aa8', life: 0.9, vz: 0.01 });
     SK.Particles.ring(t.i, t.j, { size: 90, life: 0.5, color: 'rgba(255,154,168,' });
@@ -1416,6 +1728,7 @@ SK.Game = (function () {
     ui.subjectBadge.style.background = q.subject === 'math' ? '#8ef0c0' : '#ffd66b';
     ui.topicBadge.textContent = q.topic || '기본';
     ui.scoreVal.textContent = score;
+    renderClock();
     renderLives();
     ui.comboVal.textContent = combo > 1 ? '×' + combo : '';
 
@@ -1461,7 +1774,18 @@ SK.Game = (function () {
   /* =========================================================
    *  렌더
    * ======================================================= */
+  /* HUD 시계. 매 프레임 DOM 을 건드리지 않도록 초가 바뀔 때만 다시 쓴다. */
+  var clockShown = -1;
+  function renderClock() {
+    if (!ui.timeVal) return;
+    var sec = Math.floor(run.timeMs / 1000);
+    if (sec === clockShown) return;
+    clockShown = sec;
+    ui.timeVal.textContent = SK.Ranking.fmtTime(run.timeMs);
+  }
+
   function render() {
+    renderClock();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
@@ -1526,7 +1850,19 @@ SK.Game = (function () {
     nextQuiz();
   }
 
-  return {
+  /* 개발자용 훅을 어디서 열어 줄지.
+   *
+   *  debug.stepOn 같은 훅은 임의의 칸에 착지시켜 점수를 만들어 낼 수 있다.
+   *  배포된 주소에서 이 훅이 그대로 열려 있으면 랭킹은 아무 의미가 없다.
+   *  그래서 개발 중인 기기(localhost)와 주소에 ?debug=1 을 붙인 경우에만 연다.
+   *  그런 판은 taint() 로 표시되어 랭킹에 올라가지 않는다 — 막는 것이 아니라
+   *  "이 판은 비공식"이라고 적어 두는 쪽이다. */
+  var DEV = /[?&]debug=1(&|$)/.test(location.search) ||
+            /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+
+  function taint() { if (run) run.tainted = true; }
+
+  var api = {
     boot: boot,
     startWith: startWith,
     setSubject: setSubject,
@@ -1534,10 +1870,17 @@ SK.Game = (function () {
     skip: skip,
     restart: restart,
     relayout: resize,
+    canResume: canResume,
     getLives: function () { return lives; },
     getScore: function () { return score; },
+    getTimeMs: function () { return Math.round(run.timeMs); },
+    getRunRecord: getRunRecord,
+    getRunAuth: getRunAuth,
+    isTainted: function () { return !!run.tainted; },
+    /** 저장을 지우고 처음부터 — 시작 화면의 '새로 시작' */
+    fresh: function () { if (SK.Save) SK.Save.clear(); restart(); },
 
-    /** 디버그 / 자동 테스트용 훅 */
+    /** 디버그 / 자동 테스트용 훅 (localhost 또는 ?debug=1 에서만 열린다) */
     debug: {
       state: function () {
         return {
@@ -1556,17 +1899,18 @@ SK.Game = (function () {
           })
         };
       },
-      tick: function (dt) { now += dt; update(dt); render(); },
+      tick: function (dt) { taint(); now += dt; update(dt); render(); },
       /** 특정 타일에 착지시켜 판정을 발생시킨다 */
       stepOn: function (i, j, power) {
+        taint();
         player.ci = i; player.cj = j;
         player.x = i; player.y = j; player.z = 0;
         player.hopping = false;
         land(power > 1 ? 1 : 0.5, power || 1, i, j);
         return fsm.progress.slice();
       },
-      press: function (dx, dy, jump) { input.dx = dx; input.dy = dy; if (jump) requestJump(); },
-      release: function () { input.dx = 0; input.dy = 0; },
+      press: function (dx, dy, jump) { taint(); input.dx = dx; input.dy = dy; if (jump) requestJump(); },
+      release: function () { taint(); input.dx = 0; input.dy = 0; },
       safeRect: safeRect,
       /** 지금 조준 표시가 켜진 타일 수 (0 또는 1) */
       /** 임의의 칸 재질 읽기/바꾸기 — 특정 재질의 연출을 확인할 때 쓴다 */
@@ -1583,6 +1927,7 @@ SK.Game = (function () {
       letterCount: function () { return quizTiles.length; },
       solidConnected: function () { return solidConnected(null); },
       setMat: function (i, j, mat) {
+        taint();
         var t = getTile(i, j);
         if (t) t.mat = mat;
         return t && t.mat;
@@ -1627,7 +1972,18 @@ SK.Game = (function () {
         };
         var a = toScreen(minX, minY), b = toScreen(maxX, maxY);
         return { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y, right: b.x, bottom: b.y };
-      }
+      },
+      /** 저장/복원을 눈으로 확인할 때 — 판은 건드리지 않으므로 표시하지 않는다 */
+      save: function () { return saveNow(true); },
+      snapshot: captureSave
     }
   };
+
+  if (!DEV) delete api.debug;
+
+  /* 메서드를 통째로 바꿔치기하지 못하게 굳힌다. 점수·목숨·시간은 애초에
+     이 클로저 밖으로 나가지 않으므로 콘솔에서 값을 고칠 수 없다. */
+  if (Object.freeze) { Object.freeze(api.debug); Object.freeze(api); }
+
+  return api;
 })();

@@ -14,9 +14,15 @@
     scoreVal: $('scoreVal'),
     comboVal: $('comboVal'),
     hearts: $('hearts'),
+    timeVal: $('timeVal'),
     overPanel: $('overPanel'),
     overScore: $('overScore'),
-    loadNote: $('loadNote')
+    overTime: $('overTime'),
+    overSolved: $('overSolved'),
+    overAccuracy: $('overAccuracy'),
+    loadNote: $('loadNote'),
+    // 게임 오버가 나면 게임 코어가 이 함수로 한 판의 기록을 넘겨준다
+    onGameOver: function (rec, auth) { showRankForm(rec, auth); }
   };
 
   SK.Game.boot($('game'), refs);
@@ -24,6 +30,7 @@
   /* ---------- 게임 오버 → 다시 시작 ---------- */
   $('btnRestart').addEventListener('click', function () {
     SK.Audio.ui();
+    rankForm.hidden = true;
     SK.Game.restart();
   });
 
@@ -141,15 +148,36 @@
     });
   })();
 
-  /* ---------- 시작 (사용자 제스처로 AudioContext 잠금 해제) ---------- */
+  /* ---------- 시작 (사용자 제스처로 AudioContext 잠금 해제) ----------
+   *
+   *  하던 판이 남아 있으면 게임은 이미 그 판을 되살린 채로 이 화면 뒤에 떠 있다.
+   *  그래서 여기서는 "그대로 이어갈지, 버리고 새로 시작할지"만 고르면 된다. */
   var overlay = $('startOverlay');
-  $('btnStart').addEventListener('click', function () {
+  var btnStart = $('btnStart'), btnFresh = $('btnFresh');
+
+  function enterGame() {
     SK.Audio.init();
     SK.Audio.ui();
     overlay.classList.add('hidden');
     SK.Game.relayout();
     loadAudioManifest();
+  }
+
+  btnStart.addEventListener('click', enterGame);
+  btnFresh.addEventListener('click', function () {
+    SK.Game.fresh();          // 저장을 지우고 처음부터
+    enterGame();
   });
+
+  /** 퀴즈가 다 실려 판이 정해진 뒤에 부른다 */
+  function refreshResumeUi() {
+    var can = SK.Game.canResume && SK.Game.canResume();
+    var line = $('resumeLine'), info = $('resumeInfo');
+    if (line) line.hidden = !can;
+    if (can && info) info.textContent = SK.Save.summary();
+    btnStart.textContent = can ? '이어서 산책하기' : '산책 시작하기';
+    btnFresh.hidden = !can;
+  }
 
   /** 오디오 에셋 매니페스트 (docs/AUDIO_MAPPING.md 참고) */
   function loadAudioManifest() {
@@ -179,9 +207,215 @@
       .catch(function () { /* 매니페스트 없음 — 절차적 합성 사용 */ });
   }
 
+
+  /* =========================================================
+   *  랭킹 — 등록 화면
+   *
+   *  닉네임은 누구나 보는 목록에 그대로 올라간다. 그래서 두 겹으로 막는다.
+   *    · 기계가 알아볼 수 있는 것(이메일·전화·주민번호·학년반번호)은 검사에서 걸러내고
+   *    · 나머지는 안내문과 확인 체크로 본인이 한 번 더 확인하게 한다
+   *  둘 다 통과해야 등록 버튼이 켜진다.
+   * ======================================================= */
+  var NICK_KEY = 'sk.nick.v1';
+  var pendingRec = null, pendingAuth = null, submitting = false;
+
+  var rankForm = $('rankForm'), nickInput = $('nickInput'), nickAgree = $('nickAgree');
+  var btnRankSubmit = $('btnRankSubmit'), rankMsg = $('rankMsg');
+
+  /* 화면이 열릴 때 걸어 두는 안내 — 입력 검사가 지우지 않고 되돌려 놓는다 */
+  var standingMsg = '', standingKind = '';
+
+  function setMsg(text, kind) {
+    rankMsg.textContent = text || '';
+    rankMsg.className = 'rank-msg' + (kind ? ' ' + kind : '');
+  }
+
+  function setStanding(text, kind) {
+    standingMsg = text || ''; standingKind = kind || '';
+    setMsg(standingMsg, standingKind);
+  }
+
+  function syncSubmitBtn() {
+    var v = SK.Ranking.validateNick(nickInput.value);
+    btnRankSubmit.disabled = submitting || !v.ok || !nickAgree.checked;
+    if (!nickInput.value.trim()) { setMsg(standingMsg, standingKind); return; }
+    if (!v.ok) setMsg(v.reason, 'bad');
+    else if (!nickAgree.checked) setMsg('아래 확인란에 체크해 주세요.', '');
+    else setMsg(standingMsg, standingKind);
+  }
+
+  nickInput.addEventListener('input', syncSubmitBtn);
+  nickAgree.addEventListener('change', syncSubmitBtn);
+
+  function showRankForm(rec, auth) {
+    pendingRec = rec; pendingAuth = auth; submitting = false;
+    rankForm.hidden = false;
+    nickAgree.checked = false;
+    try { nickInput.value = localStorage.getItem(NICK_KEY) || ''; } catch (e) { nickInput.value = ''; }
+    btnRankSubmit.textContent = '랭킹 등록';
+    if (rec.tainted) {
+      setStanding('개발자 도구로 판을 조작한 기록이라 랭킹에는 올리지 않고 이 기기에만 저장돼요.', 'bad');
+    } else if (!SK.Ranking.isConfigured()) {
+      setStanding('랭킹 서버가 아직 설정되지 않았어요. 기록은 이 기기에 저장됩니다.', '');
+    } else {
+      setStanding('');
+    }
+    syncSubmitBtn();
+  }
+
+  rankForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (submitting || !pendingRec) return;
+    var v = SK.Ranking.validateNick(nickInput.value);
+    if (!v.ok) { setMsg(v.reason, 'bad'); return; }
+    if (!nickAgree.checked) { setMsg('아래 확인란에 체크해 주세요.', 'bad'); return; }
+
+    submitting = true;
+    btnRankSubmit.disabled = true;
+    btnRankSubmit.textContent = '등록하는 중…';
+    setMsg('기록을 보내는 중이에요…', '');
+    try { localStorage.setItem(NICK_KEY, v.value); } catch (e2) { /* 기억하지 못해도 그만 */ }
+
+    var rec = {};
+    for (var k in pendingRec) rec[k] = pendingRec[k];
+    rec.nick = v.value;
+
+    SK.Ranking.submit(rec, pendingAuth).then(function (res) {
+      submitting = false;
+      btnRankSubmit.textContent = '등록 완료';
+      if (res.ok && res.stored === 'sheet') {
+        setMsg(res.rank ? ('랭킹에 올랐어요 — 점수 ' + res.rank + '위!') : '랭킹에 올렸어요!', 'good');
+      } else {
+        setMsg(res.reason || '이 기기에 저장했어요.', res.ok ? '' : 'bad');
+      }
+      openRank(v.value);
+    });
+  });
+
+  $('btnRankSkip').addEventListener('click', function () {
+    SK.Audio.ui();
+    rankForm.hidden = true;
+  });
+
+  /* =========================================================
+   *  랭킹 — 순위표
+   * ======================================================= */
+  var rankPanel = $('rankPanel'), rankList = $('rankList'), rankNote = $('rankNote');
+  var rankTabs = $('rankTabs'), btnRankOrder = $('btnRankOrder'), rankQuery = $('rankQuery');
+  var rankCat = 'score', rankOrder = 'desc', rankMe = '', rankSeq = 0;
+
+  SK.Ranking.CATEGORIES.forEach(function (c) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = c.ko;
+    b.dataset.cat = c.key;
+    b.setAttribute('role', 'tab');
+    b.addEventListener('click', function () {
+      SK.Audio.ui();
+      rankCat = c.key;
+      rankQuery.value = '';
+      syncTabs();
+      loadBoard();
+    });
+    rankTabs.appendChild(b);
+  });
+
+  function syncTabs() {
+    Array.prototype.forEach.call(rankTabs.children, function (b) {
+      b.classList.toggle('active', b.dataset.cat === rankCat);
+      b.setAttribute('aria-selected', b.dataset.cat === rankCat ? 'true' : 'false');
+    });
+    btnRankOrder.textContent = rankOrder === 'desc' ? '▼ 높은 순' : '▲ 낮은 순';
+  }
+
+  btnRankOrder.addEventListener('click', function () {
+    SK.Audio.ui();
+    rankOrder = rankOrder === 'desc' ? 'asc' : 'desc';
+    syncTabs();
+    if (rankQuery.value.trim()) doSearch(); else loadBoard();
+  });
+
+  $('rankSearchForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    doSearch();
+  });
+
+  function esc(t) {
+    return String(t).replace(/[&<>"]/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c];
+    });
+  }
+
+  function rowHtml(r) {
+    var cls = 'rank-row';
+    if (r.rank <= 3 && rankOrder === 'desc') cls += ' top' + r.rank;
+    if (rankMe && r.nick === rankMe) cls += ' me';
+    var sub = '점수 ' + (r.score || 0) +
+              ' · ' + SK.Ranking.fmtTime(r.timeMs || 0) +
+              ' · ' + (r.solved || 0) + '문제' +
+              ' · 정확도 ' + Math.round((r.accuracy || 0) * 100) + '%';
+    return '<div class="' + cls + '">' +
+             '<div class="rank-no">' + r.rank + '</div>' +
+             '<div class="rank-nick">' + esc(r.nick) + '<span class="rank-sub">' + sub + '</span></div>' +
+             '<div class="rank-val">' + SK.Ranking.fmtValue(rankCat, r.value) + '</div>' +
+           '</div>';
+  }
+
+  function paint(rows, note) {
+    rankNote.textContent = note || '';
+    if (!rows || !rows.length) {
+      rankList.innerHTML = '<div class="rank-empty">아직 기록이 없어요.<br>한 판 하고 첫 기록을 남겨 보세요!</div>';
+      return;
+    }
+    rankList.innerHTML = rows.map(rowHtml).join('');
+  }
+
+  function loadBoard() {
+    var my = ++rankSeq;
+    rankList.innerHTML = '<div class="rank-empty">불러오는 중…</div>';
+    rankNote.textContent = '';
+    SK.Ranking.board({ category: rankCat, order: rankOrder, limit: 100 }).then(function (res) {
+      if (my !== rankSeq) return;                     // 더 최근 요청이 있으면 버린다
+      var note = res.message;
+      if (!note && res.total > res.rows.length) {
+        note = '전체 ' + res.total + '명 중 ' + res.rows.length + '명까지 보여 줘요. 그 아래 순위는 닉네임으로 검색하세요.';
+      }
+      paint(res.rows, note);
+    });
+  }
+
+  function doSearch() {
+    var q = rankQuery.value.trim();
+    if (!q) { loadBoard(); return; }
+    var my = ++rankSeq;
+    rankList.innerHTML = '<div class="rank-empty">찾는 중…</div>';
+    SK.Ranking.search(q, { category: rankCat, order: rankOrder }).then(function (res) {
+      if (my !== rankSeq) return;
+      paint(res.rows, res.message || ('"' + q + '" 검색 결과 ' + res.rows.length + '명'));
+    });
+  }
+
+  function openRank(highlight) {
+    rankMe = highlight || '';
+    rankPanel.hidden = false;
+    syncTabs();
+    if (rankQuery.value.trim()) doSearch(); else loadBoard();
+  }
+
+  function closeRank() { rankPanel.hidden = true; }
+
+  $('btnRank').addEventListener('click', function () { SK.Audio.ui(); setMenu(false); openRank(); });
+  $('btnRankOpen').addEventListener('click', function () { SK.Audio.ui(); openRank(rankMe); });
+  $('btnRankClose').addEventListener('click', function () { SK.Audio.ui(); closeRank(); });
+  rankPanel.addEventListener('click', function (e) { if (e.target === rankPanel) closeRank(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !rankPanel.hidden) closeRank();
+  });
+
   /* ---------- 퀴즈 데이터 로드 ---------- */
   SK.Quiz.load('data/quizzes.json').then(function (res) {
     SK.Game.startWith(res.quizzes, res.source);
+    refreshResumeUi();
   }).catch(function (e) {
     refs.prompt.textContent = '문제 데이터를 불러오지 못했습니다.';
     refs.hint.textContent = String((e && e.message) || e);

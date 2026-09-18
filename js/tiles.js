@@ -1629,6 +1629,7 @@ SK.Tiles = (function () {
     surfaceOffset: surfaceOffset,
     thicknessOf: thicknessOf,
     isSolid: isSolid,
+    rebuildCracks: buildCracks,
     BUBBLE_CELLS: BUBBLE_CELLS,
     setIso: setIso
   };

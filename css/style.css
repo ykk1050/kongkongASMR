@@ -210,12 +210,14 @@ body.no-pads #touchPad,body.no-pads #touchJump{display:none}
 
 /* ================= 시작 오버레이 ================= */
 #startOverlay{
-  position:absolute;inset:0;z-index:20;display:grid;place-items:center;padding:20px;
+  position:absolute;inset:0;z-index:20;display:flex;padding:20px;
+  overflow-y:auto;-webkit-overflow-scrolling:touch;
   background:rgba(10,12,28,.74);backdrop-filter:blur(10px);
 }
 #startOverlay.hidden{display:none}
 .start-card{
-  max-width:440px;width:100%;text-align:center;padding:26px 22px;border-radius:22px;
+  /* margin:auto 가 핵심 — 들어갈 때는 가운데, 넘칠 때는 위부터 스크롤된다 */
+  margin:auto;max-width:440px;width:100%;text-align:center;padding:26px 22px;border-radius:22px;
   background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.05));
   border:1px solid rgba(255,255,255,.18);
 }
@@ -239,11 +241,12 @@ body.no-pads #touchPad,body.no-pads #touchJump{display:none}
 
 /* ================= 게임 오버 ================= */
 #overPanel{
-  position:absolute;inset:0;z-index:22;display:grid;place-items:center;padding:20px;
+  position:absolute;inset:0;z-index:22;display:flex;padding:20px;
+  overflow-y:auto;-webkit-overflow-scrolling:touch;
   background:rgba(24,8,16,.78);backdrop-filter:blur(10px);
 }
 #overPanel[hidden]{display:none}
-#overPanel .start-card{border-color:rgba(255,154,168,.4)}
+#overPanel .start-card{border-color:rgba(255,154,168,.4);padding:20px 18px}
 #overPanel h2{color:var(--bad)}
 .over-score{font-size:15px}
 .over-score b{
@@ -254,4 +257,136 @@ body.no-pads #touchPad,body.no-pads #touchJump{display:none}
   position:absolute;z-index:4;left:50%;transform:translateX(-50%);
   bottom:calc(4px + var(--sb));font-size:10.5px;color:rgba(244,246,255,.3);
   pointer-events:none;white-space:nowrap;
+}
+
+/* ================= 플레이 시간 ================= */
+#timeBox{
+  font-size:12px;color:var(--dim);white-space:nowrap;
+  font-variant-numeric:tabular-nums;letter-spacing:.2px;
+}
+#timeBox span:last-child{color:var(--ink);font-weight:700}
+
+/* ================= 이어하기 안내 ================= */
+.resume-line{
+  margin:12px 0 0!important;padding:9px 12px;border-radius:12px;
+  background:rgba(142,240,192,.12);border:1px solid rgba(142,240,192,.3);
+  font-size:13px!important;
+}
+.resume-line b{color:var(--good)!important;font-variant-numeric:tabular-nums}
+.resume-line[hidden]{display:none}
+
+/* 보조 버튼 — 주 버튼(노란 알약) 옆에 놓아도 시선을 뺏지 않게 */
+.ghost-btn{
+  display:block;margin:10px auto 0;font-family:inherit;font-size:13px;font-weight:700;
+  padding:9px 18px;border-radius:999px;cursor:pointer;
+  background:rgba(255,255,255,.08);color:var(--dim);
+  border:1px solid rgba(255,255,255,.18);
+}
+.ghost-btn:hover{background:rgba(255,255,255,.14);color:var(--ink)}
+.ghost-btn[hidden]{display:none}
+
+/* ================= 게임 오버 · 기록 요약 ================= */
+.over-stats{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:8px;
+  margin:14px 0 4px;padding:0;
+}
+.over-stats div{
+  padding:9px 10px;border-radius:13px;background:rgba(0,0,0,.26);
+}
+.over-stats dt{font-size:11px;color:var(--dim);margin:0 0 2px}
+.over-stats dd{
+  margin:0;font-size:20px;font-weight:900;color:var(--accent);
+  font-variant-numeric:tabular-nums;line-height:1.15;
+}
+
+/* ================= 랭킹 등록 폼 ================= */
+.rank-form{
+  margin:14px 0 6px;padding:13px;border-radius:15px;text-align:left;
+  background:rgba(0,0,0,.26);border:1px solid rgba(255,255,255,.1);
+}
+.rank-form[hidden]{display:none}
+.rank-label{display:block;font-size:12px;font-weight:700;color:var(--dim);margin-bottom:6px}
+#nickInput{
+  width:100%;font-family:inherit;font-size:16px;font-weight:700;padding:11px 13px;
+  border-radius:12px;background:rgba(255,255,255,.1);color:var(--ink);
+  border:1px solid rgba(255,255,255,.2);
+}
+#nickInput:focus{outline:2px solid var(--aim);outline-offset:1px}
+.rank-warn{
+  margin:9px 0 0!important;padding:9px 11px;border-radius:11px;font-size:12px!important;
+  background:rgba(255,154,168,.13);border:1px solid rgba(255,154,168,.34);
+  color:var(--dim);line-height:1.6;
+}
+.rank-warn b{color:var(--bad)!important}
+.rank-check{
+  display:flex;align-items:flex-start;gap:8px;margin-top:10px;
+  font-size:12.5px;color:var(--dim);line-height:1.5;cursor:pointer;
+}
+.rank-check input{width:18px;height:18px;margin:0;flex:0 0 auto;accent-color:var(--good)}
+.rank-msg{margin:9px 0 0!important;font-size:12.5px!important;min-height:1em}
+.rank-msg.good{color:var(--good)!important}
+.rank-msg.bad{color:var(--bad)!important}
+.rank-actions{display:flex;gap:8px;align-items:center;margin-top:11px}
+#btnRankSubmit{
+  flex:1;font-family:inherit;font-size:14px;font-weight:800;padding:11px 14px;
+  border:0;border-radius:999px;background:var(--good);color:#0e2a1e;cursor:pointer;
+}
+#btnRankSubmit:disabled{background:rgba(255,255,255,.14);color:rgba(244,246,255,.4);cursor:not-allowed}
+.rank-actions .ghost-btn{margin:0;flex:0 0 auto}
+
+/* ================= 랭킹 화면 ================= */
+#rankPanel{
+  position:absolute;inset:0;z-index:24;display:flex;padding:16px;
+  background:rgba(10,12,28,.84);backdrop-filter:blur(10px);
+}
+.rank-card{margin:auto}
+#rankPanel[hidden]{display:none}
+.rank-card{
+  width:100%;max-width:560px;max-height:100%;display:flex;flex-direction:column;
+  padding:16px 16px 12px;border-radius:20px;
+  background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.05));
+  border:1px solid rgba(255,255,255,.18);
+}
+.rank-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.rank-head h2{margin:0;font-size:19px;flex:1}
+.rank-tabs{display:flex;gap:6px;flex-wrap:wrap}
+.rank-tabs button{
+  font-family:inherit;font-size:12.5px;font-weight:700;padding:8px 12px;border-radius:999px;
+  background:rgba(255,255,255,.08);color:var(--dim);
+  border:1px solid rgba(255,255,255,.16);cursor:pointer;
+}
+.rank-tabs button.active{background:var(--accent);color:#2a2410;border-color:transparent}
+.rank-tools{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.rank-search{display:flex;gap:6px;flex:1;min-width:190px}
+#rankQuery{
+  flex:1;min-width:0;font-family:inherit;font-size:13px;padding:8px 11px;border-radius:999px;
+  background:rgba(255,255,255,.08);color:var(--ink);border:1px solid rgba(255,255,255,.18);
+}
+.rank-note{margin:9px 0 0;font-size:11.5px;color:var(--dim);min-height:1em;line-height:1.5}
+.rank-list{margin-top:8px;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:120px}
+.rank-row{
+  display:grid;grid-template-columns:44px 1fr auto;align-items:center;gap:9px;
+  padding:8px 10px;border-radius:11px;font-size:13.5px;
+}
+.rank-row:nth-child(odd){background:rgba(255,255,255,.045)}
+.rank-row.me{background:rgba(142,240,192,.16);outline:1px solid rgba(142,240,192,.4)}
+.rank-no{
+  font-size:12px;font-weight:800;color:var(--dim);text-align:right;
+  font-variant-numeric:tabular-nums;
+}
+.rank-row.top1 .rank-no,.rank-row.top2 .rank-no,.rank-row.top3 .rank-no{color:var(--accent)}
+.rank-nick{
+  font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.rank-sub{display:block;font-size:10.5px;font-weight:400;color:var(--dim);margin-top:1px}
+.rank-val{
+  font-weight:900;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.rank-empty{padding:22px 10px;text-align:center;color:var(--dim);font-size:13px;line-height:1.7}
+
+@media (max-width:520px){
+  .over-stats dd{font-size:17px}
+  .rank-row{grid-template-columns:38px 1fr auto;font-size:12.5px}
+  /* 좁은 화면에서는 검색칸을 한 줄 통째로 — 안 그러면 입력칸이 손톱만해진다 */
+  .rank-search{flex-basis:100%}
 }

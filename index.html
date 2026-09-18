@@ -24,6 +24,7 @@
       <span id="subjectBadge" class="badge">사회</span>
       <span id="topicBadge" class="badge ghost">지리</span>
       <div class="spacer"></div>
+      <div id="timeBox" title="이 판을 시작한 뒤 논 시간"><span aria-hidden="true">⏱</span> <span id="timeVal">0:00</span></div>
       <div id="hearts" aria-label="남은 목숨"></div>
       <div id="scoreBox">
         <span class="score-label">점수</span>
@@ -37,7 +38,7 @@
     <p id="hint" class="hint"></p>
   </header>
 
-  <!-- ====== 메뉴 (과목 필터 · 다음 문제 · 소리) ====== -->
+  <!-- ====== 메뉴 (단원 필터 · 다음 문제 · 소리) ====== -->
   <div id="menuPanel" hidden>
     <div class="menu-group" role="group" aria-label="단원 선택">
       <button class="ctl" data-subject="all">전체</button>
@@ -46,6 +47,7 @@
       <button class="ctl" data-subject="생활·문화">생활·문화</button>
     </div>
     <button class="ctl wide" id="btnSkip">다음 문제 ▸</button>
+    <button class="ctl wide" id="btnRank">🏆 랭킹 보기</button>
     <button class="ctl wide" id="btnMute">🔊 소리 끄기</button>
     <button class="ctl wide" id="btnPads">🎮 조이스틱 켜기 / 끄기</button>
     <button class="ctl wide" id="btnDiag">🧪 입력 진단</button>
@@ -55,7 +57,7 @@
       <div id="legendList"></div>
     </div>
 
-    <p class="menu-note">조이스틱으로 방향을 잡고 <b>쿵</b> 버튼을 눌러 점프.<br>키보드는 <b>W A S D</b>·방향키로 조준하고 <b>Space</b>로 점프합니다.<br>대각선은 <b>Q E Z C</b>(넘패드 <b>7 9 1 3</b>) 한 키로도 됩니다.<br>점프가 안 먹히면 <b>입력 진단</b>을 켜서 키가 실제로 도착하는지 확인하세요.</p>
+    <p class="menu-note">조이스틱으로 방향을 잡고 <b>쿵</b> 버튼을 눌러 점프.<br>키보드는 <b>W A S D</b>·방향키로 조준하고 <b>Space</b>로 점프합니다.<br>대각선은 <b>Q E Z C</b>(넘패드 <b>7 9 1 3</b>) 한 키로도 됩니다.<br>하던 판은 저절로 저장돼요 — 창을 닫았다 들어와도 이어서 할 수 있습니다.</p>
   </div>
 
   <!-- ====== 가상 조이스틱 / 점프 버튼 ====== -->
@@ -75,19 +77,70 @@
         <span><b>③</b> 방향 없이 점프하면 제자리 <b>강한 내려찍기</b></span>
       </p>
       <p class="small">타일 생김새마다 소리가 달라요. 이어폰을 끼면 입체 음향이 훨씬 좋습니다.</p>
+      <p id="resumeLine" class="resume-line" hidden>하던 판이 남아 있어요 · <b id="resumeInfo"></b></p>
       <button id="btnStart">산책 시작하기</button>
+      <button type="button" id="btnFresh" class="ghost-btn" hidden>처음부터 새로 시작</button>
     </div>
   </div>
 
-  <!-- ====== 게임 오버 ====== -->
+  <!-- ====== 게임 오버 · 랭킹 등록 ====== -->
   <div id="overPanel" hidden>
     <div class="start-card">
       <div class="start-emoji">💔</div>
       <h2>게임 오버</h2>
-      <p>목숨을 모두 잃었어요.</p>
-      <p class="over-score">최종 점수 <b id="overScore">0</b></p>
+
+      <dl class="over-stats">
+        <div><dt>점수</dt><dd id="overScore">0</dd></div>
+        <div><dt>버틴 시간</dt><dd id="overTime">0:00</dd></div>
+        <div><dt>맞힌 문제</dt><dd id="overSolved">0</dd></div>
+        <div><dt>정확도</dt><dd id="overAccuracy">0%</dd></div>
+      </dl>
+
+      <form id="rankForm" class="rank-form" autocomplete="off">
+        <label class="rank-label" for="nickInput">랭킹에 올릴 닉네임</label>
+        <input id="nickInput" type="text" maxlength="12" placeholder="예) 콩콩탐험가"
+               autocomplete="off" autocapitalize="off" spellcheck="false">
+        <p class="rank-warn">
+          ⚠ <b>실명 · 학교 · 학년 · 반 · 번호 · 연락처는 쓰지 마세요.</b>
+          닉네임은 누구나 볼 수 있는 랭킹에 그대로 올라갑니다.
+        </p>
+        <label class="rank-check">
+          <input type="checkbox" id="nickAgree">
+          <span>닉네임에 개인정보가 들어 있지 않음을 확인했습니다.</span>
+        </label>
+        <p id="rankMsg" class="rank-msg" role="status"></p>
+        <div class="rank-actions">
+          <button type="submit" id="btnRankSubmit" disabled>랭킹 등록</button>
+          <button type="button" class="ghost-btn" id="btnRankSkip">등록하지 않기</button>
+        </div>
+      </form>
+
       <p class="small">답을 틀리거나, 빈 칸에 빠지거나, 발판이 부서져 떨어지면 목숨이 하나 줄어요.</p>
       <button id="btnRestart">다시 시작하기</button>
+      <button type="button" class="ghost-btn" id="btnRankOpen">🏆 랭킹 보기</button>
+    </div>
+  </div>
+
+  <!-- ====== 랭킹 ====== -->
+  <div id="rankPanel" hidden>
+    <div class="rank-card">
+      <div class="rank-head">
+        <h2>🏆 랭킹</h2>
+        <button type="button" id="btnRankClose" class="icon-btn" aria-label="랭킹 닫기">✕</button>
+      </div>
+
+      <div class="rank-tabs" id="rankTabs" role="tablist" aria-label="집계 조건"></div>
+
+      <div class="rank-tools">
+        <button type="button" id="btnRankOrder" class="ctl" aria-live="polite">▼ 높은 순</button>
+        <form id="rankSearchForm" class="rank-search">
+          <input id="rankQuery" type="search" maxlength="12" placeholder="닉네임 검색">
+          <button type="submit" class="ctl">검색</button>
+        </form>
+      </div>
+
+      <p id="rankNote" class="rank-note"></p>
+      <div id="rankList" class="rank-list" aria-live="polite"></div>
     </div>
   </div>
 
@@ -103,6 +156,9 @@
 <script src="js/tiles.js"></script>
 <script src="js/player.js"></script>
 <script src="js/quiz.js"></script>
+<script src="js/ranking-config.js"></script>
+<script src="js/ranking.js"></script>
+<script src="js/save.js"></script>
 <script src="js/game.js"></script>
 <script src="js/main.js"></script>
 </body>
