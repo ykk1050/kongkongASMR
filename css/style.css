@@ -52,6 +52,18 @@ body{
 #scoreVal{font-size:19px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums}
 .combo{color:var(--accent);font-weight:800;font-size:14px}
 
+/* 남은 목숨 — 하트. 점수 옆에 붙어 한눈에 들어온다 */
+#hearts{display:flex;gap:2px;font-size:15px;line-height:1;white-space:nowrap}
+#hearts .heart{filter:drop-shadow(0 1px 2px rgba(0,0,0,.5))}
+#hearts .heart.gone{opacity:.45;filter:grayscale(1)}
+#hearts.hit{animation:heartHit .45s}
+@keyframes heartHit{
+  0%{transform:scale(1)}
+  25%{transform:scale(1.35) rotate(-6deg)}
+  60%{transform:scale(.92)}
+  100%{transform:scale(1)}
+}
+
 .icon-btn{
   pointer-events:auto;font-family:inherit;font-size:17px;line-height:1;color:var(--ink);
   background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
@@ -220,9 +232,23 @@ body.no-pads #touchPad,body.no-pads #touchJump{display:none}
 .start-card p.how span b:first-child{display:inline-block;min-width:16px;color:var(--ink)}
 /* 대각선 키 안내 — 번호가 붙은 3줄과 구분되게 한 단 들여쓰고 작게 */
 .start-card p.how span.tiny{margin-left:20px;font-size:11.5px;color:var(--dim)}
-#btnStart{
+#btnStart,#btnRestart{
   margin-top:16px;font-family:inherit;font-size:16px;font-weight:800;padding:14px 28px;
   border:0;border-radius:999px;background:var(--accent);color:#2a2410;cursor:pointer;
+}
+
+/* ================= 게임 오버 ================= */
+#overPanel{
+  position:absolute;inset:0;z-index:22;display:grid;place-items:center;padding:20px;
+  background:rgba(24,8,16,.78);backdrop-filter:blur(10px);
+}
+#overPanel[hidden]{display:none}
+#overPanel .start-card{border-color:rgba(255,154,168,.4)}
+#overPanel h2{color:var(--bad)}
+.over-score{font-size:15px}
+.over-score b{
+  font-size:26px;font-weight:900;color:var(--accent);
+  font-variant-numeric:tabular-nums;margin-left:4px;
 }
 #loadNote{
   position:absolute;z-index:4;left:50%;transform:translateX(-50%);

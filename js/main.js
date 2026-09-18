@@ -13,10 +13,19 @@
     topicBadge: $('topicBadge'),
     scoreVal: $('scoreVal'),
     comboVal: $('comboVal'),
+    hearts: $('hearts'),
+    overPanel: $('overPanel'),
+    overScore: $('overScore'),
     loadNote: $('loadNote')
   };
 
   SK.Game.boot($('game'), refs);
+
+  /* ---------- 게임 오버 → 다시 시작 ---------- */
+  $('btnRestart').addEventListener('click', function () {
+    SK.Audio.ui();
+    SK.Game.restart();
+  });
 
   /* ---------- 메뉴 열고 닫기 ---------- */
   var menu = $('menuPanel'), btnMenu = $('btnMenu');

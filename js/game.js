@@ -38,7 +38,15 @@ SK.Game = (function () {
   var quizTiles = [];
   var running = false, lastT = 0, now = 0;
   var score = 0, combo = 0, streak = 0;
-  var phase = 'idle';                      // idle | play | wrong | solved
+
+  /* 목숨.
+   *
+   *  잃는 경우는 셋이고, 셋 다 "발밑이 무너지거나 길을 잘못 들었다"는 같은 종류의
+   *  실패다 — 답을 틀렸을 때, 빈 칸에 빠졌을 때, 밟은 타일이 부서져 떨어졌을 때.
+   *  (뒤의 둘은 이미 fallIntoHole 로 모이므로 거기 한 군데만 걸면 된다.) */
+  var MAX_LIVES = 5;
+  var lives = MAX_LIVES;
+  var phase = 'idle';                      // idle | play | wrong | solved | over
   var phaseTimer = 0;
   var ui = {};
 
@@ -927,6 +935,13 @@ SK.Game = (function () {
   };
 
   function update(dt) {
+    // 게임 오버 중에는 파티클만 흐르게 두고 진행은 멈춘다
+    if (phase === 'over') {
+      SK.Particles.update(dt);
+      if (cam.shake > 0) cam.shake = Math.max(0, cam.shake - dt * 3.2);
+      if (flash > 0) flash = Math.max(0, flash - dt * 2.6);
+      return;
+    }
     if (phaseTimer > 0) {
       phaseTimer -= dt;
       if (phaseTimer <= 0) {
@@ -1198,6 +1213,7 @@ SK.Game = (function () {
 
     SK.Particles.ring(back.i, back.j, { size: 80, life: 0.45, width: 2.5, color: 'rgba(255,255,255,' });
     renderHUD(false, true);
+    loseLife(i, j);
   }
 
   /** 주어진 칸에서 가장 가까운 성한 타일 — 부서진 자리로 돌려보내면 다시 떨어진다 */
@@ -1210,6 +1226,74 @@ SK.Game = (function () {
       if (d < bestD) { bestD = d; best = t; }
     }
     return best ? { i: best.i, j: best.j } : { i: START.i, j: START.j };
+  }
+
+  /* =========================================================
+   *  목숨 · 게임 오버
+   * ======================================================= */
+
+  /**
+   * 목숨을 하나 잃는다.
+   * @param {number} i,j 실패가 일어난 칸 — 그 자리에 하트가 깨지는 연출을 띄운다
+   */
+  function loseLife(i, j) {
+    if (phase === 'over') return;
+    lives = Math.max(0, lives - 1);
+
+    SK.Particles.text(i, j, '💔', { size: 30, color: '#ff9aa8', life: 1.1, gz: 0.9, vz: 0.05 });
+    if (ui.hearts) {
+      ui.hearts.classList.remove('hit');
+      void ui.hearts.offsetWidth;          // 애니메이션 재시작
+      ui.hearts.classList.add('hit');
+    }
+    if (lives <= 0) gameOver();
+    else renderLives();
+  }
+
+  function renderLives() {
+    if (!ui.hearts) return;
+    var html = '';
+    for (var k = 0; k < MAX_LIVES; k++) {
+      html += '<span class="heart' + (k < lives ? '' : ' gone') + '">' +
+              (k < lives ? '❤️' : '🖤') + '</span>';
+    }
+    ui.hearts.innerHTML = html;
+  }
+
+  function gameOver() {
+    phase = 'over';
+    phaseTimer = 0;
+    lives = 0;
+    renderLives();
+    SK.Audio.wrong({ pan: 0 });
+    SK.Particles.text(player.ci, player.cj, 'GAME OVER', {
+      size: 34, color: '#ff9aa8', life: 2.2, gz: 1.2, vz: 0.02
+    });
+    cam.shake = 1.0;
+    setFlash(0.5, 352);
+    SK.Player.stun(player, 99);            // 게임 오버 동안에는 움직이지 않는다
+    if (ui.overScore) ui.overScore.textContent = score;
+    if (ui.overPanel) ui.overPanel.hidden = false;
+  }
+
+  /** 처음부터 다시 — 점수·목숨·보드·문제를 전부 새로 만든다 */
+  function restart() {
+    if (ui.overPanel) ui.overPanel.hidden = true;
+    score = 0; combo = 0; streak = 0;
+    lives = MAX_LIVES;
+    renderLives();
+
+    SK.Particles.clear();
+    buildWorld();
+    player = SK.Player.create(START.i, START.j);
+    player.surface = player.surfaceTarget = worldApi.surfaceOf(START.i, START.j);
+    quizTiles = [];
+    cam.shake = 0; flash = 0;
+
+    phase = 'play'; phaseTimer = 0;
+    if (fsm) fsm.reset && fsm.reset();
+    nextQuiz();
+    resize();
   }
 
   /* =========================================================
@@ -1284,6 +1368,7 @@ SK.Game = (function () {
       if (quizTiles[k] !== t) quizTiles[k].state = 'idle';
     }
     renderHUD(false, true);
+    loseLife(t.i, t.j);
   }
 
   /** 화면 전체가 순간 번쩍인다 (파괴·정답 완성) */
@@ -1331,6 +1416,7 @@ SK.Game = (function () {
     ui.subjectBadge.style.background = q.subject === 'math' ? '#8ef0c0' : '#ffd66b';
     ui.topicBadge.textContent = q.topic || '기본';
     ui.scoreVal.textContent = score;
+    renderLives();
     ui.comboVal.textContent = combo > 1 ? '×' + combo : '';
 
     if (isNew) ui.prompt.textContent = q.prompt;
@@ -1446,7 +1532,9 @@ SK.Game = (function () {
     setSubject: setSubject,
     setDiag: setDiag, isDiag: isDiag,
     skip: skip,
+    restart: restart,
     relayout: resize,
+    getLives: function () { return lives; },
     getScore: function () { return score; },
 
     /** 디버그 / 자동 테스트용 훅 */

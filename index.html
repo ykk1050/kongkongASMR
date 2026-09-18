@@ -24,6 +24,7 @@
       <span id="subjectBadge" class="badge">사회</span>
       <span id="topicBadge" class="badge ghost">지리</span>
       <div class="spacer"></div>
+      <div id="hearts" aria-label="남은 목숨"></div>
       <div id="scoreBox">
         <span class="score-label">점수</span>
         <span id="scoreVal">0</span>
@@ -74,6 +75,18 @@
       </p>
       <p class="small">타일 생김새마다 소리가 달라요. 이어폰을 끼면 입체 음향이 훨씬 좋습니다.</p>
       <button id="btnStart">산책 시작하기</button>
+    </div>
+  </div>
+
+  <!-- ====== 게임 오버 ====== -->
+  <div id="overPanel" hidden>
+    <div class="start-card">
+      <div class="start-emoji">💔</div>
+      <h2>게임 오버</h2>
+      <p>목숨을 모두 잃었어요.</p>
+      <p class="over-score">최종 점수 <b id="overScore">0</b></p>
+      <p class="small">답을 틀리거나, 빈 칸에 빠지거나, 발판이 부서져 떨어지면 목숨이 하나 줄어요.</p>
+      <button id="btnRestart">다시 시작하기</button>
     </div>
   </div>
 
