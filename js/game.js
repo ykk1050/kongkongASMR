@@ -45,9 +45,10 @@ SK.Game = (function () {
  *  정확하게 푼 사람이 각각 보이도록 여러 조건으로 집계한다. 단원별로도 나누므로
  *  '어느 단원 문제를 몇 개 시도해서 몇 개 맞혔는지'를 따로 센다.
  *
- *  ⚠ '시도한 문제'는 **글자를 한 번이라도 밟은 문제**다. 받아 본 문제(quizzes)를
- *    세면 '다음 문제'만 계속 눌러 시도 횟수를 부풀릴 수 있다. 한 번이라도 밟아야
- *    세므로 그 방법은 통하지 않고, 밟고 넘긴 문제는 정답률에서 불리하게 잡힌다.
+ *  ⚠ '시도한 문제'는 **글자를 한 번이라도 밟은 문제**다. 받아 본 문제(quizzes)와
+ *    다르다 — 게임 오버 직전에 뜬 문제처럼 손도 대지 못한 것은 시도가 아니다.
+ *    (문제를 건너뛰는 기능은 플레이어에게 주지 않는다. 모르는 문제를 넘길 수
+ *     있으면 시도 수를 부풀리고 어려운 문제를 피해 정답률을 올릴 수 있다.)
  *
  *  ⚠ 이 값들은 전부 이 클로저 안에만 있다. window 나 SK.Game 어디에도
  *    붙이지 않으므로 개발자 도구 콘솔에서 점수 변수를 직접 고칠 수 없다.
@@ -1902,11 +1903,6 @@ SK.Game = (function () {
   /* =========================================================
    *  외부 제어
    * ======================================================= */
-  function skip() {
-    if (!session) return;
-    phase = 'play'; phaseTimer = 0;
-    nextQuiz();
-  }
 
   /* 개발자용 훅을 어디서 열어 줄지.
    *
@@ -1924,7 +1920,6 @@ SK.Game = (function () {
     boot: boot,
     startWith: startWith,
     setDiag: setDiag, isDiag: isDiag,
-    skip: skip,
     restart: restart,
     relayout: resize,
     canResume: canResume,
@@ -2042,7 +2037,17 @@ SK.Game = (function () {
       },
       /** 저장/복원을 눈으로 확인할 때 — 판은 건드리지 않으므로 표시하지 않는다 */
       save: function () { return saveNow(true); },
-      snapshot: captureSave
+      snapshot: captureSave,
+      /* 문제를 건너뛰는 기능은 플레이어에게 주지 않는다. 모르는 문제를 그냥
+         넘길 수 있으면 시도 수를 부풀리고 어려운 문제를 피해 정답률을 올릴 수
+         있기 때문이다. 테스트에서 여러 문제를 훑어볼 때만 쓴다. */
+      skip: function () {
+        taint();
+        if (!session) return false;
+        phase = 'play'; phaseTimer = 0;
+        nextQuiz();
+        return true;
+      }
     }
   };
 

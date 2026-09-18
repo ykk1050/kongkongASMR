@@ -53,11 +53,7 @@
     setMenu(false);
   });
 
-  /* ---------- 다음 문제 / 소리 / 조이스틱 ---------- */
-  $('btnSkip').addEventListener('click', function () {
-    SK.Audio.ui(); SK.Game.skip(); setMenu(false);
-  });
-
+  /* ---------- 소리 / 조이스틱 ---------- */
   var btnMute = $('btnMute');
   btnMute.addEventListener('click', function () {
     var m = SK.Audio.setMuted(!SK.Audio.isMuted());
