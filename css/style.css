@@ -256,6 +256,28 @@ body.no-pads #touchDpad,body.no-pads #touchJump{display:none}
 #overPanel[hidden]{display:none}
 #overPanel .start-card{border-color:rgba(255,154,168,.4);padding:20px 18px}
 #overPanel h2{color:var(--bad)}
+
+/* ---- 게임 오버 1단계: 마지막 문제의 정답 풀이 ---- */
+#overReveal[hidden],#overResult[hidden]{display:none}
+/* 풀이는 실패가 아니라 배움이라 붉은색을 쓰지 않는다 */
+#overReveal h2{color:var(--accent)}
+.reveal-q{
+  margin:0 0 12px;color:var(--dim);font-size:14px;line-height:1.6;
+}
+.reveal-a{
+  margin:0 0 12px;padding:12px;border-radius:14px;
+  background:rgba(255,214,107,.14);border:1px solid rgba(255,214,107,.34);
+}
+.reveal-a b{font-size:clamp(20px,5vw,26px);font-weight:900;color:var(--accent);letter-spacing:.02em}
+.reveal-why{
+  margin:0;color:var(--ink);font-size:14px;line-height:1.7;text-align:left;
+  padding:12px;border-radius:14px;background:rgba(0,0,0,.24);
+}
+.reveal-why:empty{display:none}
+#btnRevealOk{
+  margin-top:16px;font-family:inherit;font-size:16px;font-weight:800;padding:14px 34px;
+  border:0;border-radius:999px;background:var(--accent);color:#2a2410;cursor:pointer;
+}
 .over-score{font-size:15px}
 .over-score b{
   font-size:26px;font-weight:900;color:var(--accent);

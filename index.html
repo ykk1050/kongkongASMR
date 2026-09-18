@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🎧</text></svg>">
-<link rel="stylesheet" href="css/style.css?v=c1ddfca058">
+<link rel="stylesheet" href="css/style.css?v=c16f003f49">
 </head>
 <body>
 
@@ -86,9 +86,23 @@
     </div>
   </div>
 
-  <!-- ====== 게임 오버 · 랭킹 등록 ====== -->
+  <!-- ====== 게임 오버 · 정답 풀이 → 랭킹 등록 ======
+       끝난 직후에 가장 궁금한 건 점수가 아니라 "그래서 답이 뭐였는데?" 다.
+       그래서 마지막 문제의 풀이를 먼저 보여 주고, 확인을 누르면 성적과
+       랭킹 등록으로 넘어간다. -->
   <div id="overPanel" hidden>
     <div class="start-card">
+
+      <section id="overReveal">
+        <div class="start-emoji">💡</div>
+        <h2>정답은 이거였어요</h2>
+        <p class="reveal-q" id="revealPrompt"></p>
+        <p class="reveal-a"><b id="revealAnswer"></b></p>
+        <p class="reveal-why" id="revealWhy"></p>
+        <button id="btnRevealOk">확인</button>
+      </section>
+
+      <div id="overResult" hidden>
       <div class="start-emoji">💔</div>
       <h2>게임 오버</h2>
 
@@ -123,6 +137,7 @@
       <p class="small">답을 틀리거나, 빈 칸에 빠지거나, 발판이 부서져 떨어지면 목숨이 하나 줄어요.</p>
       <button id="btnRestart">다시 시작하기</button>
       <button type="button" class="ghost-btn" id="btnRankOpen">🏆 랭킹 보기</button>
+      </div>
     </div>
   </div>
 
@@ -150,22 +165,22 @@
     </div>
   </div>
 
-  <div id="loadNote">Created by gamtudyssam using AI · 0.00027</div>
+  <div id="loadNote">Created by gamtudyssam using AI · 0.00028</div>
 </div>
 
 <!-- 외부 JSON을 못 읽는 file:// 환경을 위한 내장 폴백 데이터 -->
-<script src="data/quizzes.fallback.js?v=c1ddfca058"></script>
+<script src="data/quizzes.fallback.js?v=c16f003f49"></script>
 
-<script src="js/audio.js?v=c1ddfca058"></script>
-<script src="js/iso.js?v=c1ddfca058"></script>
-<script src="js/particles.js?v=c1ddfca058"></script>
-<script src="js/tiles.js?v=c1ddfca058"></script>
-<script src="js/player.js?v=c1ddfca058"></script>
-<script src="js/quiz.js?v=c1ddfca058"></script>
-<script src="js/ranking-config.js?v=c1ddfca058"></script>
-<script src="js/ranking.js?v=c1ddfca058"></script>
-<script src="js/save.js?v=c1ddfca058"></script>
-<script src="js/game.js?v=c1ddfca058"></script>
-<script src="js/main.js?v=c1ddfca058"></script>
+<script src="js/audio.js?v=c16f003f49"></script>
+<script src="js/iso.js?v=c16f003f49"></script>
+<script src="js/particles.js?v=c16f003f49"></script>
+<script src="js/tiles.js?v=c16f003f49"></script>
+<script src="js/player.js?v=c16f003f49"></script>
+<script src="js/quiz.js?v=c16f003f49"></script>
+<script src="js/ranking-config.js?v=c16f003f49"></script>
+<script src="js/ranking.js?v=c16f003f49"></script>
+<script src="js/save.js?v=c16f003f49"></script>
+<script src="js/game.js?v=c16f003f49"></script>
+<script src="js/main.js?v=c16f003f49"></script>
 </body>
 </html>

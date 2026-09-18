@@ -68,6 +68,11 @@
     overRate: $('overRate'),
     overAccuracy: $('overAccuracy'),
     overCombo: $('overCombo'),
+    overReveal: $('overReveal'),
+    overResult: $('overResult'),
+    revealPrompt: $('revealPrompt'),
+    revealAnswer: $('revealAnswer'),
+    revealWhy: $('revealWhy'),
     loadNote: $('loadNote'),
     // 게임 오버가 나면 게임 코어가 이 함수로 한 판의 기록을 넘겨준다
     onGameOver: function (rec, auth) { showRankForm(rec, auth); }
@@ -105,6 +110,12 @@
     btnStart.textContent = can ? '이어서 산책하기' : '산책 시작하기';
     btnFresh.hidden = !can;
   }
+
+  /* ---------- 게임 오버: 정답 풀이 → 성적·랭킹 ---------- */
+  $('btnRevealOk').addEventListener('click', function () {
+    SK.Audio.ui();
+    SK.Game.revealDone();
+  });
 
   /* ---------- 게임 오버 → 다시 시작 ---------- */
   $('btnRestart').addEventListener('click', function () {

@@ -1101,7 +1101,12 @@ SK.Game = (function () {
   var loopErrors = 0;
 
   function loop(ts) {
-    var dt = Math.min(0.05, (ts - lastT) / 1000);
+    /* dt 는 절대 음수가 되면 안 된다. lastT 는 performance.now() 로 찍는데 rAF 가
+       넘겨 주는 ts 는 **그 프레임이 시작된 시각**이라 조금 더 이르다 — 판을 새로
+       시작한 직후처럼 둘을 연달아 찍는 순간에 (ts - lastT) 가 음수로 나온다.
+       그러면 파티클의 age 가 음수가 되고, 링의 반지름이 음수가 되어 arc() 가
+       예외를 던진다. 실제로 게임 오버 → 다시 시작에서 한 프레임씩 그림이 끊겼다. */
+    var dt = Math.max(0, Math.min(0.05, (ts - lastT) / 1000));
     lastT = ts; now = ts / 1000;
     /* 한 프레임에서 예외가 나면 requestAnimationFrame 재예약까지 건너뛰어
        **게임이 통째로 멈춘다**. 실제로 입력 코드의 변수 이름 충돌 하나로 그렇게
@@ -1475,6 +1480,11 @@ SK.Game = (function () {
        목숨 0짜리 판이 되살아난다. */
     if (SK.Save) SK.Save.clear();
 
+    /* 끝난 직후에 가장 궁금한 건 점수가 아니라 "그래서 답이 뭐였는데?" 다.
+       그래서 마지막 문제의 풀이를 먼저 띄우고, 확인을 눌러야 성적·랭킹으로 넘어간다.
+       (문제를 풀다 죽었으므로 fsm.quiz 가 곧 방금 틀린 그 문제다) */
+    showReveal(fsm && fsm.quiz);
+
     var rec = getRunRecord();
     if (ui.overScore) ui.overScore.textContent = score;
     if (ui.overTime) ui.overTime.textContent = SK.Ranking.fmtTime(rec.timeMs);
@@ -1488,9 +1498,49 @@ SK.Game = (function () {
     if (typeof ui.onGameOver === 'function') ui.onGameOver(rec, getRunAuth());
   }
 
+  /**
+   * 정답을 읽기 좋은 형태로 — `q.answer` 는 타일에 올린 글자를 이어 붙인 것이라
+   * 띄어쓰기가 없다("신석기시대"). 풀이글은 보통 제대로 띄어 쓴 정답으로 시작하므로
+   * ("신석기 시대! 농사와 …") 그 머리말이 정답과 같으면 그쪽을 보여 주고,
+   * 뒤의 설명만 따로 떼어 낸다. 규칙에 맞지 않는 문제는 있는 그대로 쓴다.
+   * @returns {{answer:string, why:string}}
+   */
+  function splitReveal(q) {
+    var answer = (q && q.answer) || '';
+    var why = (q && q.reveal) || '';
+    if (!why) return { answer: answer, why: '' };
+    var cut = why.search(/[!.?]/);
+    if (cut < 0) return { answer: answer, why: why };
+    var head = why.slice(0, cut);
+    if (head.replace(/\s/g, '') !== answer.replace(/\s/g, '')) return { answer: answer, why: why };
+    return { answer: head, why: why.slice(cut + 1).replace(/^\s+/, '') };
+  }
+
+  /**
+   * 게임 오버 1단계 — 마지막 문제의 정답과 풀이.
+   * 풀이(`reveal`)가 없는 문제도 있으므로 정답만으로도 화면이 성립해야 한다.
+   */
+  function showReveal(q) {
+    var r = splitReveal(q);
+    if (ui.revealPrompt) ui.revealPrompt.textContent = q ? q.prompt : '';
+    if (ui.revealAnswer) ui.revealAnswer.textContent = r.answer;
+    if (ui.revealWhy) ui.revealWhy.textContent = r.why;
+    if (ui.overReveal) ui.overReveal.hidden = false;
+    if (ui.overResult) ui.overResult.hidden = true;
+  }
+
+  /** 확인을 눌렀을 때 — 성적과 랭킹 등록으로 넘어간다 */
+  function revealDone() {
+    if (ui.overReveal) ui.overReveal.hidden = true;
+    if (ui.overResult) ui.overResult.hidden = false;
+  }
+
   /** 처음부터 다시 — 점수·목숨·보드·문제를 전부 새로 만든다 */
   function restart() {
     if (ui.overPanel) ui.overPanel.hidden = true;
+    // 다음 게임 오버는 다시 풀이부터 — 여기서 되돌려 놓지 않으면 성적이 먼저 뜬다
+    if (ui.overReveal) ui.overReveal.hidden = false;
+    if (ui.overResult) ui.overResult.hidden = true;
     score = 0; combo = 0; streak = 0;
     lives = MAX_LIVES;
     resetRun();
@@ -1995,6 +2045,7 @@ SK.Game = (function () {
     boot: boot,
     startWith: startWith,
     setDiag: setDiag, isDiag: isDiag,
+    revealDone: revealDone,
     restart: restart,
     relayout: resize,
     canResume: canResume,
