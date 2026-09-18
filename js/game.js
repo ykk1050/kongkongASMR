@@ -898,15 +898,21 @@ SK.Game = (function () {
       /* 새로 누른 칸이 있을 때만 톡 기억을 갱신한다. 손을 뗄 때 갱신하면
          조준이 영영 살아 있게 되고, 아무것도 안 누른 채로도 점프가 나간다. */
       if (pressedNow) {
-        var tnow = performance.now();
-        // 한참 쉬었다 누른 것이면 이전 조준은 버린다 (키보드와 같은 규칙)
-        if (tnow - lastDirAt > CHAIN_MS) { tapX.code = null; tapY.code = null; }
+        /* 패드의 한 칸은 **그 자체로 완결된 방향**이다. 그래서 누를 때마다 이전
+           톡 기억을 통째로 버리고 지금 눌린 칸만으로 다시 세운다.
+           키보드에는 "짧은 간격 안에 이어 누른 두 방향키를 대각선으로 합치는"
+           규칙(CHAIN_MS)이 있는데, 그걸 패드에도 적용했던 게 문제였다 —
+           ↑ 를 눌렀다 곧바로 → 를 누르면 ↑ 의 세로 성분이 남아 →가 아니라 ↗가
+           됐다. 0.45초를 기다려야 비로소 원하는 방향이 나왔다.
+           한 축만 덮는 상하좌우에서만 새던 버그라, 두 축을 모두 덮는 대각선
+           칸에서는 멀쩡해 보였다. */
+        tapX.code = null; tapY.code = null;
         for (var m = 0; m < DPAD_KEYS.length; m++) {
           if (!on[DPAD_KEYS[m]]) continue;
           if (KEYDIR[DPAD_KEYS[m]][0]) tapX.code = DPAD_KEYS[m];
           if (KEYDIR[DPAD_KEYS[m]][1]) tapY.code = DPAD_KEYS[m];
         }
-        lastDirAt = tnow;
+        lastDirAt = performance.now();
         if (diagEl) pushDiag('down', pressedNow);
       }
       syncKeyDir();
