@@ -22,8 +22,12 @@ SK.Game = (function () {
     'gravel', 'water', 'cookie', 'ice', 'paper', 'metal'
   ];
 
+  /* 판을 새로 깔 때마다 바뀌는 씨앗.
+     이게 없으면 재질이 칸 좌표만으로 정해져, 새로 깔아도 늘 똑같은 그림이 된다. */
+  var boardSeed = (Math.random() * 0x7fffffff) | 0;
+
   function ambientMat(i, j) {
-    var h = (i * 73856093) ^ (j * 19349663);
+    var h = (i * 73856093) ^ (j * 19349663) ^ (boardSeed * 83492791);
     h = (h ^ (h >>> 13)) >>> 0;
     return AMBIENT_MATS[h % AMBIENT_MATS.length];
   }
@@ -245,7 +249,14 @@ SK.Game = (function () {
      글자를 놓을 자리가 모자라면 문제를 풀 수가 없다. */
   var MIN_SOLID = 10;
 
-  function buildWorld() {
+  /**
+   * 판을 처음부터 새로 만든다.
+   * @param {{i:number,j:number}} [keep] 구멍으로 뚫지 말아야 할 칸.
+   *        문제가 바뀔 때는 캐릭터가 서 있는 칸이 여기 들어간다 — 발밑이
+   *        갑자기 사라지면 밟지도 않았는데 떨어진다.
+   */
+  function buildWorld(keep) {
+    boardSeed = (Math.random() * 0x7fffffff) | 0;
     tiles = []; tileAt = {};
     for (var i = 0; i < GRID; i++) {
       for (var j = 0; j < GRID; j++) {
@@ -254,7 +265,43 @@ SK.Game = (function () {
         tileAt[i + ',' + j] = t;
       }
     }
-    carveHoles();
+    carveHoles(keep);
+  }
+
+  /* 문제가 바뀔 때마다 판을 새로 깐다.
+   *
+   *  예전에는 한 게임 내내 같은 타일을 썼다. 그래서 앞 문제에서 부서뜨린 자리가
+   *  그대로 남아, 문제를 풀수록 발판이 줄고 판이 닳아 갔다 — 뒤에 나온 문제일수록
+   *  불리했고, 심하면 글자를 놓을 자리조차 모자랐다.
+   *  이제 문제마다 재질·구멍 배치를 새로 만들어 모두 같은 조건에서 시작한다.
+   *
+   *  ⚠ 캐릭터가 선 칸은 남겨 두고, 발밑 높이를 새 재질에 맞춰 다시 맞춘다.
+   *    (재질마다 두께가 달라서 이걸 빠뜨리면 캐릭터가 공중에 뜨거나 파묻힌다)
+   */
+  function refreshBoard() {
+    var here = player ? { i: player.ci, j: player.cj } : { i: START.i, j: START.j };
+    if (!inBounds(here.i, here.j)) here = { i: START.i, j: START.j };
+
+    quizTiles = [];
+    buildWorld(here);
+
+    if (player) {
+      if (!SK.Tiles.isSolid(getTile(player.ci, player.cj))) {
+        var back = nearestSolid(player.ci, player.cj);
+        player.ci = back.i; player.cj = back.j;
+        player.x = back.i; player.y = back.j; player.z = 0;
+        player.hopping = false;
+      }
+      player.fromI = player.ci; player.fromJ = player.cj;
+      player.surface = player.surfaceTarget = worldApi.surfaceOf(player.ci, player.cj);
+
+      /* 새로 깔린 타일이 살짝 눌렸다 올라오게 해서 '판이 바뀌었다'가 눈에 보이게 한다.
+         타일의 스프링 물리를 그대로 쓰므로 따로 연출을 만들 필요가 없다. */
+      for (var k = 0; k < tiles.length; k++) tiles[k].press = 0.16 + Math.random() * 0.14;
+      SK.Particles.ring(player.ci, player.cj, {
+        size: 150, life: 0.5, width: 2, color: 'rgba(255,255,255,'
+      });
+    }
   }
 
   /** 남은 타일이 전부 이어져 있는가 (8방향 이웃 기준) */
@@ -278,11 +325,12 @@ SK.Game = (function () {
     return reached === total;
   }
 
-  function carveHoles() {
+  function carveHoles(keep) {
     var cand = [];
     for (var i = 0; i < GRID; i++) {
       for (var j = 0; j < GRID; j++) {
         if (i === START.i && j === START.j) continue;     // 시작 칸은 남긴다
+        if (keep && i === keep.i && j === keep.j) continue;   // 서 있는 칸도 남긴다
         cand.push({ i: i, j: j });
       }
     }
@@ -353,6 +401,7 @@ SK.Game = (function () {
     run.quizzes++;
     quizTouched = false;
     fsm.setQuiz(q);
+    refreshBoard();          // 앞 문제에서 부서진 자리를 물려받지 않는다
     layoutQuiz(q);
     phase = 'play';
     SK.Audio.newQuiz();
@@ -360,7 +409,7 @@ SK.Game = (function () {
     saveNow(true);
   }
 
-  /** 문제 타일을 바닥에 뿌린다 — 밟힌 흔적과 균열은 그대로 둔다 */
+  /** 문제 타일을 바닥에 뿌린다 (판은 refreshBoard 가 이미 새로 깔아 두었다) */
   function layoutQuiz(q) {
     for (var k = 0; k < quizTiles.length; k++) {
       var old = quizTiles[k];
@@ -961,11 +1010,15 @@ SK.Game = (function () {
     var before = GRID;
     pickGrid();
     if (GRID !== before && player) {
-      buildWorld();
+      /* 새 격자에 맞춰 캐릭터를 먼저 안으로 당긴 다음, 그 칸은 구멍으로
+         뚫지 않는다 — 화면을 돌렸다는 이유로 발밑이 사라지면 안 된다. */
       player.ci = Math.min(player.ci, GRID - 1);
       player.cj = Math.min(player.cj, GRID - 1);
+      buildWorld({ i: player.ci, j: player.cj });
       player.x = player.ci; player.y = player.cj;
       player.hopping = false;
+      player.fromI = player.ci; player.fromJ = player.cj;
+      player.surface = player.surfaceTarget = worldApi.surfaceOf(player.ci, player.cj);
       if (fsm && fsm.quiz) { quizTiles = []; layoutQuiz(fsm.quiz); }
     }
 
@@ -1499,6 +1552,7 @@ SK.Game = (function () {
       },
       touched: quizTouched ? 1 : 0,
       auth: runAuth,
+      seed: boardSeed,
       quizId: fsm.quiz.id,
       progress: fsm.progress.slice(),
       attempts: fsm.attempts, mistakes: fsm.mistakes,
@@ -1549,6 +1603,7 @@ SK.Game = (function () {
        같은 판이어야 한다 — 화면에 맞추는 일은 resize() 의 배율이 맡는다. */
     GRID = snap.grid;
     START = { i: snap.start.i, j: snap.start.j };
+    if (snap.seed != null) boardSeed = snap.seed | 0;
 
     tiles = []; tileAt = {}; quizTiles = [];
     for (n = 0; n < snap.tiles.length; n++) {
