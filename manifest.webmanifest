@@ -1,7 +1,7 @@
 {
   "name": "소리 콩콩 학습 산책",
   "short_name": "소리 콩콩",
-  "description": "타일을 콩콩 뛰며 사회·수학 문제를 푸는 ASMR 학습 게임",
+  "description": "타일을 콩콩 뛰며 한국사 문제를 푸는 ASMR 학습 게임",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

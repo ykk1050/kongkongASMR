@@ -274,10 +274,13 @@ SK.Quiz = (function () {
         this.queue = [];
       },
 
+      /* 필터 값은 과목 키('social'·'math') 또는 단원 이름 둘 다 될 수 있다.
+         문제집이 한 과목으로만 이루어져 있을 때 단원별로 나눠 풀 수 있게 하기 위함. */
       pool: function () {
         var f = this.filter;
         if (f === 'all') return this.all;
-        return this.all.filter(function (q) { return q.subject === f; });
+        var hit = this.all.filter(function (q) { return q.subject === f || q.topic === f; });
+        return hit.length ? hit : this.all;   // 빈 필터로 게임이 멈추지 않게
       },
 
       /** 다음 문제. 한 바퀴 다 돌면 다시 섞어서 순환 */

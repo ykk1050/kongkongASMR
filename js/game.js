@@ -1515,7 +1515,7 @@ SK.Game = (function () {
   function setSubject(f) {
     if (!session) return;
     session.setFilter(f);
-    if (!session.pool().length) { ui.prompt.textContent = '해당 과목의 문제가 없습니다.'; return; }
+    if (!session.pool().length) { ui.prompt.textContent = '해당 단원의 문제가 없습니다.'; return; }
     phase = 'play'; phaseTimer = 0;
     nextQuiz();
   }
