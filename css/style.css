@@ -350,6 +350,10 @@ body.no-pads #touchPad,body.no-pads #touchJump{display:none}
 .rank-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
 .rank-head h2{margin:0;font-size:19px;flex:1}
 .rank-tabs{display:flex;gap:6px;flex-wrap:wrap}
+/* 단원 줄은 지표 줄보다 한 단 작게 — 무엇이 상위 선택인지 눈에 보이게 */
+.rank-tabs.sub{margin-bottom:7px}
+.rank-tabs.sub button{font-size:11.5px;padding:6px 10px;border-radius:9px}
+.rank-tabs.sub button.active{background:rgba(93,240,255,.9);color:#062a30}
 .rank-tabs button{
   font-family:inherit;font-size:12.5px;font-weight:700;padding:8px 12px;border-radius:999px;
   background:rgba(255,255,255,.08);color:var(--dim);

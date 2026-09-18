@@ -27,17 +27,59 @@ SK.Ranking = (function () {
 
   /* =========================================================
    *  집계 조건
+   *
+   *  ── 무엇을 어떻게 모으나 ──────────────────────────────────
+   *  점수만 **한 판 최고**로 세고, 나머지는 **여러 판을 누적**한다.
+   *  점수는 한 판 안에서 콤보를 얼마나 이어 갔는지를 보는 값이지만,
+   *  시도·맞힘·정답률은 "얼마나 많이, 얼마나 정확하게 공부했는가"라서
+   *  판을 나눠 세면 오히려 뜻이 흐려지기 때문이다. 짧게 한 판 잘 본 것보다
+   *  꾸준히 많이 푼 쪽이 위로 가는 게 교실에서 맞다.
+   *
+   *  ── 버틴 시간은 왜 없나 ──────────────────────────────────
+   *  제한 시간이 없는 게임이라 켜 두기만 해도 늘어난다. 줄을 세울 수 있는
+   *  값이 아니라서 랭킹 조건에서 뺐다. 다만 기록(시트)에는 그대로 남고,
+   *  '시간에 비해 점수가 너무 높지 않은가' 같은 검사에는 계속 쓰인다.
    * ======================================================= */
-  var CATEGORIES = [
-    { key: 'score',    ko: '점수',      fmt: 'num',  unit: '점' },
-    { key: 'timeMs',   ko: '버틴 시간', fmt: 'time', unit: '' },
-    { key: 'solved',   ko: '맞힌 문제', fmt: 'num',  unit: '문제' },
-    { key: 'accuracy', ko: '정확도',    fmt: 'pct',  unit: '' }
+
+  /** 정답률·단원별 랭킹에 들어가려면 이만큼은 시도해야 한다 */
+  var GATE = 30;
+
+  var METRICS = [
+    { key: 'score',    ko: '점수',      fmt: 'num', unit: '점',   topical: false },
+    { key: 'solved',   ko: '맞힌 문제', fmt: 'num', unit: '문제', topical: true },
+    { key: 'attempts', ko: '시도 문제', fmt: 'num', unit: '문제', topical: false },
+    { key: 'rate',     ko: '정답률',    fmt: 'pct', unit: '',     topical: true, gated: true }
   ];
 
-  function category(key) {
-    for (var i = 0; i < CATEGORIES.length; i++) if (CATEGORIES[i].key === key) return CATEGORIES[i];
-    return CATEGORIES[0];
+  function metric(key) {
+    for (var i = 0; i < METRICS.length; i++) if (METRICS[i].key === key) return METRICS[i];
+    return METRICS[0];
+  }
+
+  /** 단원을 골랐을 때 고를 수 있는 지표 — 점수·시도는 전체에서만 의미가 있다 */
+  function metricsFor(topic) {
+    return topic ? METRICS.filter(function (m) { return m.topical; }) : METRICS.slice();
+  }
+
+  /** 'rate' 또는 'rate@선사·고조선' */
+  function catKey(metricKey, topic) {
+    return topic ? (metricKey + '@' + topic) : metricKey;
+  }
+
+  function parseCat(cat) {
+    var s = String(cat || 'score');
+    var at = s.indexOf('@');
+    var m = at < 0 ? s : s.slice(0, at);
+    var t = at < 0 ? '' : s.slice(at + 1);
+    var mm = metric(m);
+    if (t && !mm.topical) t = '';
+    return { metric: mm, topic: t, key: catKey(mm.key, t) };
+  }
+
+  /** 이 조건에 들어가려면 시도 문제 수가 얼마여야 하나 (0 이면 제한 없음) */
+  function gateOf(cat) {
+    var c = parseCat(cat);
+    return (c.metric.gated || c.topic) ? GATE : 0;
   }
 
   /** 초 단위까지의 시간 표기 — 1시간을 넘기면 h:mm:ss */
@@ -48,11 +90,12 @@ SK.Ranking = (function () {
     return h ? (h + ':' + p(m) + ':' + p(ss)) : (m + ':' + p(ss));
   }
 
+  function fmtPct(v) { return (Math.round((+v || 0) * 1000) / 10) + '%'; }
+
   function fmtValue(cat, v) {
-    var c = category(cat);
-    if (c.fmt === 'time') return fmtTime(v);
-    if (c.fmt === 'pct') return (Math.round((+v || 0) * 1000) / 10) + '%';
-    return String(Math.round(+v || 0)) + (c.unit ? ' ' + c.unit : '');
+    var m = parseCat(cat).metric;
+    if (m.fmt === 'pct') return fmtPct(v);
+    return String(Math.round(+v || 0)) + (m.unit ? ' ' + m.unit : '');
   }
 
   /* =========================================================
@@ -67,7 +110,7 @@ SK.Ranking = (function () {
   var MAX_NICK = 12;
 
   var NICK_RULES = [
-    { re: /[<>"'\\/\x00-\x1f]/,            msg: '쓸 수 없는 문자가 들어 있어요.' },
+    { re: /[<>"'\\/\x00-\x1f]/,                msg: '쓸 수 없는 문자가 들어 있어요.' },
     { re: /@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/,     msg: '이메일 주소는 닉네임에 쓸 수 없어요.' },
     { re: /01[0-9][-.\s]?\d{3,4}[-.\s]?\d{4}/, msg: '전화번호는 닉네임에 쓸 수 없어요.' },
     { re: /\d{6}[-\s]?[1-4]\d{6}/,             msg: '주민등록번호는 절대 쓰면 안 돼요.' },
@@ -121,7 +164,8 @@ SK.Ranking = (function () {
     return ('0000000' + h.toString(16)).slice(-8);
   }
 
-  var SIG_FIELDS = ['nick', 'score', 'timeMs', 'solved', 'hits', 'misses', 'falls', 'maxCombo'];
+  var SIG_FIELDS = ['nick', 'score', 'timeMs', 'attempts', 'solved',
+                    'hits', 'misses', 'falls', 'maxCombo', 'topics'];
 
   function canonical(rec) {
     var parts = [];
@@ -175,9 +219,12 @@ SK.Ranking = (function () {
 
   /* =========================================================
    *  이 기기에만 남는 기록 — 서버가 없을 때의 대체재
+   *
+   *  서버가 하는 집계를 그대로 흉내 낸다. 규칙이 갈리면 "서버가 있을 때와
+   *  없을 때 순위가 다른" 혼란이 생기므로 두 곳을 같이 고쳐야 한다.
    * ======================================================= */
-  var LOCAL_KEY = 'sk.rank.local.v1';
-  var LOCAL_MAX = 100;
+  var LOCAL_KEY = 'sk.rank.local.v2';
+  var LOCAL_MAX = 300;
 
   function localLoad() {
     try {
@@ -187,50 +234,89 @@ SK.Ranking = (function () {
     } catch (e) { return []; }
   }
 
-  function localSave(list) {
-    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(list.slice(0, LOCAL_MAX))); }
-    catch (e) { /* 저장 공간이 없어도 게임은 계속된다 */ }
-  }
-
   function localAdd(rec) {
     var list = localLoad();
     list.push({
-      nick: rec.nick, score: rec.score, timeMs: rec.timeMs, solved: rec.solved,
-      hits: rec.hits, misses: rec.misses, accuracy: accuracyOf(rec), at: Date.now()
+      nick: rec.nick, score: rec.score, timeMs: rec.timeMs,
+      attempts: rec.attempts, solved: rec.solved,
+      topics: rec.topics || '', at: Date.now()
     });
-    list.sort(function (a, b) { return b.score - a.score; });
-    localSave(list);
-    return list;
+    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(list.slice(-LOCAL_MAX))); }
+    catch (e) { /* 저장 공간이 없어도 게임은 계속된다 */ }
   }
 
-  function accuracyOf(rec) {
-    var tries = (+rec.hits || 0) + (+rec.misses || 0);
-    return tries ? (+rec.hits || 0) / tries : 0;
+  /** '단원:시도/맞힘|…' 를 집계표로 */
+  function parseTopics(text) {
+    var out = {};
+    String(text || '').split('|').forEach(function (part) {
+      if (!part) return;
+      var c = part.lastIndexOf(':');
+      if (c < 1) return;
+      var nums = part.slice(c + 1).split('/');
+      var a = parseInt(nums[0], 10), s = parseInt(nums[1], 10);
+      if (!(a >= 0) || !(s >= 0)) return;
+      out[part.slice(0, c)] = { a: a, s: s };
+    });
+    return out;
   }
 
-  /** 서버가 하는 집계를 이 기기 기록으로 흉내 낸다 — 닉네임별 최고 기록 */
-  function localBoard(opt) {
-    var cat = category(opt && opt.category).key;
-    var desc = !opt || opt.order !== 'asc';
-    var best = Object.create(null);
+  /** 여러 판을 닉네임 하나로 — 점수만 최고, 나머지는 누적 */
+  function foldRuns(runs) {
+    var agg = { nick: runs[0].nick, score: 0, attempts: 0, solved: 0,
+                topics: {}, runs: runs.length, at: 0 };
+    runs.forEach(function (r) {
+      agg.score = Math.max(agg.score, +r.score || 0);
+      agg.attempts += +r.attempts || 0;
+      agg.solved += +r.solved || 0;
+      agg.at = Math.max(agg.at, +r.at || 0);
+      var t = parseTopics(r.topics);
+      for (var k in t) {
+        if (!agg.topics[k]) agg.topics[k] = { a: 0, s: 0 };
+        agg.topics[k].a += t[k].a;
+        agg.topics[k].s += t[k].s;
+      }
+    });
+    agg.rate = agg.attempts ? agg.solved / agg.attempts : 0;
+    return agg;
+  }
+
+  /** 집계된 한 사람에게서 이 조건의 값과 자격을 뽑는다 */
+  function valueOf(agg, cat) {
+    var c = parseCat(cat);
+    var scope = c.topic ? (agg.topics[c.topic] || { a: 0, s: 0 })
+                        : { a: agg.attempts, s: agg.solved };
+    var eligible = gateOf(cat) ? scope.a >= GATE : true;
+    var value;
+    if (c.metric.key === 'score') value = agg.score;
+    else if (c.metric.key === 'attempts') value = scope.a;
+    else if (c.metric.key === 'solved') value = scope.s;
+    else value = scope.a ? scope.s / scope.a : 0;
+    return { value: value, eligible: eligible, tA: scope.a, tS: scope.s };
+  }
+
+  function localBoard(cat, order) {
+    var byNick = {};
     localLoad().forEach(function (r) {
-      var cur = best[r.nick];
-      var v = +r[cat] || 0;
-      if (!cur || (+cur[cat] || 0) < v) best[r.nick] = r;
+      (byNick[r.nick] = byNick[r.nick] || []).push(r);
     });
     var rows = [];
-    for (var n in best) rows.push(best[n]);
+    for (var n in byNick) {
+      var agg = foldRuns(byNick[n]);
+      var v = valueOf(agg, cat);
+      if (!v.eligible) continue;
+      rows.push({
+        nick: agg.nick, value: v.value, score: agg.score,
+        attempts: agg.attempts, solved: agg.solved, rate: agg.rate,
+        tA: v.tA, tS: v.tS, runs: agg.runs, at: agg.at
+      });
+    }
     rows.sort(function (a, b) {
-      var d = (+b[cat] || 0) - (+a[cat] || 0);
-      return desc ? d : -d;
+      if (b.value !== a.value) return b.value - a.value;
+      return a.at - b.at;
     });
-    return rows.map(function (r, i) {
-      return {
-        rank: i + 1, nick: r.nick, value: +r[cat] || 0,
-        score: r.score, timeMs: r.timeMs, solved: r.solved,
-        accuracy: r.accuracy, at: r.at
-      };
-    });
+    if (order === 'asc') rows.reverse();
+    rows.forEach(function (r, i) { r.rank = i + 1; });
+    return rows;
   }
 
   /* =========================================================
@@ -247,7 +333,7 @@ SK.Ranking = (function () {
 
   /**
    * 기록 등록.
-   * @param {object} rec  nick·score·timeMs·solved·hits·misses·falls·maxCombo·quizzes·grid
+   * @param {object} rec  nick·score·timeMs·attempts·solved·hits·misses·falls·maxCombo·topics
    * @param {object} run  startRun() 이 준 {runId, token} — 없으면 이 기기 기록으로만 남는다
    * @returns {Promise<{ok:boolean, stored:string, rank:number|null, reason:string}>}
    */
@@ -268,15 +354,17 @@ SK.Ranking = (function () {
       nick: rec.nick,
       score: Math.round(rec.score),
       timeMs: Math.round(rec.timeMs),
+      attempts: Math.round(rec.attempts),
       solved: Math.round(rec.solved),
       hits: Math.round(rec.hits),
       misses: Math.round(rec.misses),
       falls: Math.round(rec.falls),
       maxCombo: Math.round(rec.maxCombo),
+      topics: rec.topics || '',
       quizzes: Math.round(rec.quizzes || 0),
       grid: Math.round(rec.grid || 0),
       wallMs: Math.round(rec.wallMs || 0),
-      ver: rec.ver || '1'
+      ver: rec.ver || '2'
     };
     return call(q).then(function (res) {
       if (res && res.ok) {
@@ -301,11 +389,12 @@ SK.Ranking = (function () {
    */
   function board(opt) {
     opt = opt || {};
-    var cat = category(opt.category).key;
+    var cat = parseCat(opt.category).key;
     var order = opt.order === 'asc' ? 'asc' : 'desc';
     var limit = Math.min(100, Math.max(1, opt.limit || 100));
+
     if (!isConfigured()) {
-      var rows = localBoard({ category: cat, order: order });
+      var rows = localBoard(cat, order);
       return Promise.resolve({
         rows: rows.slice(0, limit), source: 'local', total: rows.length,
         message: '랭킹 서버가 설정되지 않아 이 기기 기록만 보여 줘요.'
@@ -317,7 +406,7 @@ SK.Ranking = (function () {
         return { rows: res.rows || [], source: 'sheet', total: res.total || 0, message: '' };
       })
       .catch(function () {
-        var l = localBoard({ category: cat, order: order });
+        var l = localBoard(cat, order);
         return {
           rows: l.slice(0, limit), source: 'local', total: l.length,
           message: '랭킹 서버에 연결하지 못해 이 기기 기록을 보여 줘요.'
@@ -325,18 +414,16 @@ SK.Ranking = (function () {
       });
   }
 
-  /**
-   * 닉네임 검색 — 100위 바깥도 찾을 수 있다.
-   */
+  /** 닉네임 검색 — 100위 바깥도 찾을 수 있다 */
   function search(nick, opt) {
     opt = opt || {};
-    var cat = category(opt.category).key;
+    var cat = parseCat(opt.category).key;
     var order = opt.order === 'asc' ? 'asc' : 'desc';
     var q = String(nick || '').trim();
     if (!q) return Promise.resolve({ rows: [], source: 'none', message: '찾을 닉네임을 입력해 주세요.' });
 
     if (!isConfigured()) {
-      var rows = localBoard({ category: cat, order: order }).filter(function (r) {
+      var rows = localBoard(cat, order).filter(function (r) {
         return r.nick.toLowerCase().indexOf(q.toLowerCase()) >= 0;
       });
       return Promise.resolve({
@@ -358,9 +445,14 @@ SK.Ranking = (function () {
   }
 
   return {
-    CATEGORIES: CATEGORIES,
+    METRICS: METRICS,
+    GATE: GATE,
     MAX_NICK: MAX_NICK,
-    category: category,
+    metric: metric,
+    metricsFor: metricsFor,
+    catKey: catKey,
+    parseCat: parseCat,
+    gateOf: gateOf,
     isConfigured: isConfigured,
     validateNick: validateNick,
     startRun: startRun,
@@ -368,9 +460,12 @@ SK.Ranking = (function () {
     board: board,
     search: search,
     fmtTime: fmtTime,
+    fmtPct: fmtPct,
     fmtValue: fmtValue,
     /* 서버와 짝을 이루는 함수 — 테스트에서 맞춰 보려고 내보낸다 */
     _sign: sign,
-    _canonical: canonical
+    _canonical: canonical,
+    _foldRuns: foldRuns,
+    _valueOf: valueOf
   };
 })();

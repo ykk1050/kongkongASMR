@@ -91,9 +91,9 @@
 
       <dl class="over-stats">
         <div><dt>점수</dt><dd id="overScore">0</dd></div>
-        <div><dt>버틴 시간</dt><dd id="overTime">0:00</dd></div>
-        <div><dt>맞힌 문제</dt><dd id="overSolved">0</dd></div>
-        <div><dt>정확도</dt><dd id="overAccuracy">0%</dd></div>
+        <div><dt>맞힘 / 시도</dt><dd id="overSolved">0 / 0</dd></div>
+        <div><dt>정답률</dt><dd id="overRate">0%</dd></div>
+        <div><dt>플레이 시간</dt><dd id="overTime">0:00</dd></div>
       </dl>
 
       <form id="rankForm" class="rank-form" autocomplete="off">
@@ -129,6 +129,7 @@
         <button type="button" id="btnRankClose" class="icon-btn" aria-label="랭킹 닫기">✕</button>
       </div>
 
+      <div class="rank-tabs sub" id="rankTopics" role="tablist" aria-label="단원"></div>
       <div class="rank-tabs" id="rankTabs" role="tablist" aria-label="집계 조건"></div>
 
       <div class="rank-tools">

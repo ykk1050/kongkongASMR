@@ -41,31 +41,61 @@ SK.Game = (function () {
 
   /* 한 판의 기록.
  *
- *  랭킹은 점수 하나로만 줄을 세우지 않는다 — 오래 버틴 사람, 많이 맞힌 사람,
- *  적게 틀린 사람이 각각 보이도록 여러 조건으로 집계한다. 그래서 판이 끝날 때
- *  필요한 값을 처음부터 모아 둔다.
+ *  랭킹은 점수 하나로만 줄을 세우지 않는다 — 많이 도전한 사람, 많이 맞힌 사람,
+ *  정확하게 푼 사람이 각각 보이도록 여러 조건으로 집계한다. 단원별로도 나누므로
+ *  '어느 단원 문제를 몇 개 시도해서 몇 개 맞혔는지'를 따로 센다.
+ *
+ *  ⚠ '시도한 문제'는 **글자를 한 번이라도 밟은 문제**다. 받아 본 문제(quizzes)를
+ *    세면 '다음 문제'만 계속 눌러 시도 횟수를 부풀릴 수 있다. 한 번이라도 밟아야
+ *    세므로 그 방법은 통하지 않고, 밟고 넘긴 문제는 정답률에서 불리하게 잡힌다.
  *
  *  ⚠ 이 값들은 전부 이 클로저 안에만 있다. window 나 SK.Game 어디에도
  *    붙이지 않으므로 개발자 도구 콘솔에서 점수 변수를 직접 고칠 수 없다.
  *    (남은 구멍 — 게임 파일 자체를 고친 경우 — 은 서버 쪽 타당성 검사가 맡는다) */
-  var RUN_VER = '1';
+  var RUN_VER = '2';
   var run = null;
   var runAuth = null;          // 서버가 발급한 1회용 실행 토큰
+  var quizTouched = false;     // 지금 문제의 글자를 한 번이라도 밟았는가
 
   function resetRun() {
     run = {
       startedAt: Date.now(),
       timeMs: 0,               // 실제로 논 시간 — 탭이 숨으면 같이 멈춘다
+      attempts: 0,             // 시도한 문제 수 (글자를 한 번이라도 밟은 문제)
       solved: 0,               // 끝까지 맞힌 문제 수
       hits: 0,                 // 순서에 맞게 밟은 글자 수
       misses: 0,               // 틀리게 밟은 횟수
       falls: 0,                // 빈 칸·부서진 자리로 떨어진 횟수
       maxCombo: 0,
-      quizzes: 0,              // 받아 본 문제 수
+      quizzes: 0,              // 받아 본 문제 수 (시도하지 않고 넘긴 것도 포함)
+      byTopic: Object.create(null),   // 단원 → { a: 시도, s: 맞힘 }
       tainted: false           // 개발자용 훅을 쓴 판 — 랭킹에 올리지 않는다
     };
+    quizTouched = false;
   }
   resetRun();
+
+  /* 단원 이름은 기록을 한 칸에 담을 때 구분자로 쓰는 문자를 포함할 수 없다.
+     (형식: 단원:시도/맞힘 을 | 로 이어 붙인다 — docs/RANKING.md 참고) */
+  function topicKey(name) {
+    return String(name == null || name === '' ? '기타' : name).replace(/[|:/]/g, '-');
+  }
+
+  function topicStat(name) {
+    var k = topicKey(name);
+    if (!run.byTopic[k]) run.byTopic[k] = { a: 0, s: 0 };
+    return run.byTopic[k];
+  }
+
+  /** 단원별 집계를 한 줄 문자열로 — 시트의 '단원별' 칸에 그대로 들어간다 */
+  function topicsString() {
+    var parts = [];
+    for (var k in run.byTopic) {
+      var t = run.byTopic[k];
+      if (t.a > 0) parts.push(k + ':' + t.a + '/' + t.s);
+    }
+    return parts.join('|');
+  }
 
   /* 서버가 토큰을 받아 주는 기한보다 넉넉히 앞서 새로 받는다 */
   var TOKEN_REFRESH_MS = 10 * 3600 * 1000;
@@ -90,6 +120,7 @@ SK.Game = (function () {
     return {
       score: score,
       timeMs: Math.round(run.timeMs),
+      attempts: run.attempts,
       solved: run.solved,
       hits: run.hits,
       misses: run.misses,
@@ -97,6 +128,10 @@ SK.Game = (function () {
       maxCombo: run.maxCombo,
       quizzes: run.quizzes,
       grid: GRID,
+      topics: topicsString(),
+      /** 정답률 — 시도한 문제 중 끝까지 맞힌 비율 */
+      rate: run.attempts ? run.solved / run.attempts : 0,
+      /** 밟기 정확도 — 글자 한 장 단위. 랭킹에는 쓰지 않고 기록에만 남긴다 */
       accuracy: tries ? run.hits / tries : 0,
       /* 벽시계로 잰 시간. 서버는 '논 시간이 실제로 흐른 시간보다 길 수는 없다'는
          것만 본다 — 잠시 자리를 비워 벽시계가 훨씬 길어지는 것은 정상이다. */
@@ -315,6 +350,7 @@ SK.Game = (function () {
     var q = session.next();
     if (!q) { ui.prompt.textContent = '해당 과목의 문제가 없습니다.'; return; }
     run.quizzes++;
+    quizTouched = false;
     fsm.setQuiz(q);
     layoutQuiz(q);
     phase = 'play';
@@ -1378,8 +1414,8 @@ SK.Game = (function () {
     var rec = getRunRecord();
     if (ui.overScore) ui.overScore.textContent = score;
     if (ui.overTime) ui.overTime.textContent = SK.Ranking.fmtTime(rec.timeMs);
-    if (ui.overSolved) ui.overSolved.textContent = rec.solved;
-    if (ui.overAccuracy) ui.overAccuracy.textContent = Math.round(rec.accuracy * 100) + '%';
+    if (ui.overSolved) ui.overSolved.textContent = rec.solved + ' / ' + rec.attempts;
+    if (ui.overRate) ui.overRate.textContent = Math.round(rec.rate * 100) + '%';
     if (ui.overPanel) ui.overPanel.hidden = false;
 
     // 랭킹 등록 화면은 main.js 가 맡는다 — 게임 코어는 값만 넘긴다
@@ -1453,10 +1489,12 @@ SK.Game = (function () {
       score: score, combo: combo, streak: streak, lives: lives,
       timeMs: Math.round(run.timeMs),
       run: {
-        startedAt: run.startedAt, solved: run.solved, hits: run.hits,
-        misses: run.misses, falls: run.falls, maxCombo: run.maxCombo,
-        quizzes: run.quizzes, tainted: run.tainted ? 1 : 0
+        startedAt: run.startedAt, attempts: run.attempts, solved: run.solved,
+        hits: run.hits, misses: run.misses, falls: run.falls,
+        maxCombo: run.maxCombo, quizzes: run.quizzes,
+        topics: topicsString(), tainted: run.tainted ? 1 : 0
       },
+      touched: quizTouched ? 1 : 0,
       auth: runAuth,
       quizId: fsm.quiz.id,
       progress: fsm.progress.slice(),
@@ -1558,9 +1596,12 @@ SK.Game = (function () {
     var r = snap.run || {};
     run.startedAt = r.startedAt || Date.now();
     run.timeMs = Math.max(0, +snap.timeMs || 0);
-    run.solved = r.solved | 0; run.hits = r.hits | 0; run.misses = r.misses | 0;
+    run.attempts = r.attempts | 0; run.solved = r.solved | 0;
+    run.hits = r.hits | 0; run.misses = r.misses | 0;
     run.falls = r.falls | 0; run.maxCombo = r.maxCombo | 0; run.quizzes = r.quizzes | 0;
     run.tainted = !!r.tainted;
+    parseTopics(r.topics);
+    quizTouched = !!snap.touched;
 
     /* 실행 토큰은 판에 붙어 있다 — 이어한 판도 같은 한 판이므로 그대로 쓴다.
        다만 며칠 뒤에 이어 받으면 서버가 낡은 토큰을 받아 주지 않으므로
@@ -1594,6 +1635,20 @@ SK.Game = (function () {
     return true;
   }
 
+  /** topicsString() 이 만든 한 줄을 다시 집계표로 */
+  function parseTopics(text) {
+    run.byTopic = Object.create(null);
+    String(text || '').split('|').forEach(function (part) {
+      if (!part) return;
+      var c = part.lastIndexOf(':');
+      if (c < 1) return;
+      var nums = part.slice(c + 1).split('/');
+      var a = parseInt(nums[0], 10), sv = parseInt(nums[1], 10);
+      if (!(a >= 0) || !(sv >= 0)) return;
+      run.byTopic[part.slice(0, c)] = { a: a, s: sv };
+    });
+  }
+
   /* 화면을 옮기거나 탭을 닫는 순간을 붙잡는다. pagehide 는 모바일 사파리에서
      unload 가 오지 않는 경우까지 덮는다. */
   function bindSaveHooks() {
@@ -1614,6 +1669,14 @@ SK.Game = (function () {
     var exp = fsm.expected();
     // 이미 완료된 타일을 다시 지나가는 것은 실수가 아니다
     if (t.state === 'done' && t.payload !== exp) return;
+
+    /* 이 문제를 '시도했다'고 세는 순간 — 글자를 처음 밟았을 때 딱 한 번.
+       맞게 밟았든 틀리게 밟았든 시도는 시도다. */
+    if (!quizTouched) {
+      quizTouched = true;
+      run.attempts++;
+      topicStat(fsm.quiz && fsm.quiz.topic).a++;
+    }
 
     var r = fsm.submit(t.payload);
     var pan = panOf(t.i, t.j);
@@ -1647,6 +1710,7 @@ SK.Game = (function () {
     phaseTimer = 2.1;
     score += 50 * combo;
     run.solved++;
+    topicStat(fsm.quiz && fsm.quiz.topic).s++;
     SK.Particles.celebrate(t.i, t.j);
     setFlash(0.55, 148);
     SK.Particles.text(t.i, t.j, 'CRACKLE-POP!', { size: 32, color: '#ffd66b', gz: 0.9, life: 1.4 });
@@ -1871,6 +1935,16 @@ SK.Game = (function () {
     restart: restart,
     relayout: resize,
     canResume: canResume,
+    /** 문제집에 실제로 들어 있는 단원 이름 — 랭킹 탭을 여기서 만든다 */
+    getTopics: function () {
+      var seen = Object.create(null), out = [];
+      var all = (session && session.all) || [];
+      for (var i = 0; i < all.length; i++) {
+        var k = topicKey(all[i].topic);
+        if (!seen[k]) { seen[k] = true; out.push(k); }
+      }
+      return out;
+    },
     getLives: function () { return lives; },
     getScore: function () { return score; },
     getTimeMs: function () { return Math.round(run.timeMs); },

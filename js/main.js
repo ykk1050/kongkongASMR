@@ -19,7 +19,7 @@
     overScore: $('overScore'),
     overTime: $('overTime'),
     overSolved: $('overSolved'),
-    overAccuracy: $('overAccuracy'),
+    overRate: $('overRate'),
     loadNote: $('loadNote'),
     // 게임 오버가 나면 게임 코어가 이 함수로 한 판의 기록을 넘겨준다
     onGameOver: function (rec, auth) { showRankForm(rec, auth); }
@@ -300,30 +300,70 @@
   /* =========================================================
    *  랭킹 — 순위표
    * ======================================================= */
+  /* 랭킹 화면은 두 단으로 고른다 — 위에서 **단원**, 아래에서 **지표**.
+     조건이 열 가지를 넘어가므로 한 줄에 다 늘어놓으면 고를 수가 없다.
+     점수·시도 문제는 단원별로 나누지 않으므로, 단원을 고르면 지표 줄이
+     맞힌 문제·정답률 둘로 줄어든다. */
   var rankPanel = $('rankPanel'), rankList = $('rankList'), rankNote = $('rankNote');
-  var rankTabs = $('rankTabs'), btnRankOrder = $('btnRankOrder'), rankQuery = $('rankQuery');
-  var rankCat = 'score', rankOrder = 'desc', rankMe = '', rankSeq = 0;
+  var rankTabs = $('rankTabs'), rankTopics = $('rankTopics');
+  var btnRankOrder = $('btnRankOrder'), rankQuery = $('rankQuery');
+  var rankTopic = '', rankMetric = 'score', rankOrder = 'desc', rankMe = '', rankSeq = 0;
 
-  SK.Ranking.CATEGORIES.forEach(function (c) {
+  function currentCat() { return SK.Ranking.catKey(rankMetric, rankTopic); }
+
+  function tabButton(label, onClick) {
     var b = document.createElement('button');
     b.type = 'button';
-    b.textContent = c.ko;
-    b.dataset.cat = c.key;
+    b.textContent = label;
     b.setAttribute('role', 'tab');
-    b.addEventListener('click', function () {
-      SK.Audio.ui();
-      rankCat = c.key;
-      rankQuery.value = '';
-      syncTabs();
-      loadBoard();
+    b.addEventListener('click', function () { SK.Audio.ui(); onClick(); });
+    return b;
+  }
+
+  /** 문제집에 실제로 들어 있는 단원으로 위쪽 줄을 만든다 */
+  function buildTopicTabs() {
+    rankTopics.innerHTML = '';
+    var list = [''].concat((SK.Game.getTopics && SK.Game.getTopics()) || []);
+    list.forEach(function (t) {
+      var b = tabButton(t || '전체 단원', function () {
+        rankTopic = t;
+        // 단원을 고르면 점수·시도 지표는 사라진다 — 없어진 지표에 머물지 않게
+        var ok = SK.Ranking.metricsFor(rankTopic).some(function (m) { return m.key === rankMetric; });
+        if (!ok) rankMetric = 'solved';
+        rankQuery.value = '';
+        buildMetricTabs();
+        syncTabs();
+        loadBoard();
+      });
+      b.dataset.topic = t;
+      rankTopics.appendChild(b);
     });
-    rankTabs.appendChild(b);
-  });
+  }
+
+  function buildMetricTabs() {
+    rankTabs.innerHTML = '';
+    SK.Ranking.metricsFor(rankTopic).forEach(function (m) {
+      var b = tabButton(m.ko, function () {
+        rankMetric = m.key;
+        rankQuery.value = '';
+        syncTabs();
+        loadBoard();
+      });
+      b.dataset.metric = m.key;
+      rankTabs.appendChild(b);
+    });
+  }
 
   function syncTabs() {
+    Array.prototype.forEach.call(rankTopics.children, function (b) {
+      var on = b.dataset.topic === rankTopic;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
     Array.prototype.forEach.call(rankTabs.children, function (b) {
-      b.classList.toggle('active', b.dataset.cat === rankCat);
-      b.setAttribute('aria-selected', b.dataset.cat === rankCat ? 'true' : 'false');
+      var on = b.dataset.metric === rankMetric;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
     btnRankOrder.textContent = rankOrder === 'desc' ? '▼ 높은 순' : '▲ 낮은 순';
   }
@@ -350,37 +390,67 @@
     var cls = 'rank-row';
     if (r.rank <= 3 && rankOrder === 'desc') cls += ' top' + r.rank;
     if (rankMe && r.nick === rankMe) cls += ' me';
-    var sub = '점수 ' + (r.score || 0) +
-              ' · ' + SK.Ranking.fmtTime(r.timeMs || 0) +
-              ' · ' + (r.solved || 0) + '문제' +
-              ' · 정확도 ' + Math.round((r.accuracy || 0) * 100) + '%';
+
+    var sub;
+    if (rankTopic) {
+      sub = '이 단원 ' + (r.tS || 0) + '/' + (r.tA || 0) +
+            ' · 정답률 ' + SK.Ranking.fmtPct((r.tA ? r.tS / r.tA : 0));
+    } else {
+      sub = '최고 ' + (r.score || 0) + '점' +
+            ' · 맞힘 ' + (r.solved || 0) + '/' + (r.attempts || 0) +
+            ' · 정답률 ' + SK.Ranking.fmtPct(r.rate || 0);
+    }
+    if (r.runs > 1) sub += ' · ' + r.runs + '판';
+
     return '<div class="' + cls + '">' +
              '<div class="rank-no">' + r.rank + '</div>' +
              '<div class="rank-nick">' + esc(r.nick) + '<span class="rank-sub">' + sub + '</span></div>' +
-             '<div class="rank-val">' + SK.Ranking.fmtValue(rankCat, r.value) + '</div>' +
+             '<div class="rank-val">' + SK.Ranking.fmtValue(currentCat(), r.value) + '</div>' +
            '</div>';
+  }
+
+  /** 기록이 없을 때 — 조건 때문인지 정말 없는 건지 구분해서 알려 준다 */
+  function emptyText() {
+    var gate = SK.Ranking.gateOf(currentCat());
+    if (gate) {
+      return (rankTopic ? ('‘' + esc(rankTopic) + '’ 단원을 ') : '') +
+             gate + '문제 이상 시도한 사람만 이 순위에 올라가요.<br>아직 아무도 없어요.';
+    }
+    return '아직 기록이 없어요.<br>한 판 하고 첫 기록을 남겨 보세요!';
   }
 
   function paint(rows, note) {
     rankNote.textContent = note || '';
     if (!rows || !rows.length) {
-      rankList.innerHTML = '<div class="rank-empty">아직 기록이 없어요.<br>한 판 하고 첫 기록을 남겨 보세요!</div>';
+      rankList.innerHTML = '<div class="rank-empty">' + emptyText() + '</div>';
       return;
     }
     rankList.innerHTML = rows.map(rowHtml).join('');
+  }
+
+  /** 이 조건의 참가 자격을 한 줄로 */
+  function gateNote() {
+    var gate = SK.Ranking.gateOf(currentCat());
+    if (!gate) return '';
+    return rankTopic
+      ? ('‘' + rankTopic + '’ 단원을 ' + gate + '문제 이상 시도한 사람만 집계해요.')
+      : (gate + '문제 이상 시도한 사람만 집계해요.');
   }
 
   function loadBoard() {
     var my = ++rankSeq;
     rankList.innerHTML = '<div class="rank-empty">불러오는 중…</div>';
     rankNote.textContent = '';
-    SK.Ranking.board({ category: rankCat, order: rankOrder, limit: 100 }).then(function (res) {
+    SK.Ranking.board({ category: currentCat(), order: rankOrder, limit: 100 }).then(function (res) {
       if (my !== rankSeq) return;                     // 더 최근 요청이 있으면 버린다
-      var note = res.message;
-      if (!note && res.total > res.rows.length) {
-        note = '전체 ' + res.total + '명 중 ' + res.rows.length + '명까지 보여 줘요. 그 아래 순위는 닉네임으로 검색하세요.';
+      var bits = [];
+      if (res.message) bits.push(res.message);
+      var g = gateNote();
+      if (g) bits.push(g);
+      if (res.total > res.rows.length) {
+        bits.push('전체 ' + res.total + '명 중 ' + res.rows.length + '명까지 보여 줘요. 그 아래 순위는 닉네임으로 검색하세요.');
       }
-      paint(res.rows, note);
+      paint(res.rows, bits.join(' '));
     });
   }
 
@@ -389,15 +459,18 @@
     if (!q) { loadBoard(); return; }
     var my = ++rankSeq;
     rankList.innerHTML = '<div class="rank-empty">찾는 중…</div>';
-    SK.Ranking.search(q, { category: rankCat, order: rankOrder }).then(function (res) {
+    SK.Ranking.search(q, { category: currentCat(), order: rankOrder }).then(function (res) {
       if (my !== rankSeq) return;
-      paint(res.rows, res.message || ('"' + q + '" 검색 결과 ' + res.rows.length + '명'));
+      var note = res.message || ('"' + q + '" 검색 결과 ' + res.rows.length + '명');
+      var g = gateNote();
+      paint(res.rows, g ? (note + ' ' + g) : note);
     });
   }
 
   function openRank(highlight) {
     rankMe = highlight || '';
     rankPanel.hidden = false;
+    if (!rankTopics.children.length) { buildTopicTabs(); buildMetricTabs(); }
     syncTabs();
     if (rankQuery.value.trim()) doSearch(); else loadBoard();
   }
@@ -416,6 +489,9 @@
   SK.Quiz.load('data/quizzes.json').then(function (res) {
     SK.Game.startWith(res.quizzes, res.source);
     refreshResumeUi();
+    buildTopicTabs();
+    buildMetricTabs();
+    syncTabs();
   }).catch(function (e) {
     refs.prompt.textContent = '문제 데이터를 불러오지 못했습니다.';
     refs.hint.textContent = String((e && e.message) || e);
