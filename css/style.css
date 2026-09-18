@@ -21,6 +21,9 @@
   --ctrl-gap: 18px;
   /* 화면 맨 아래 한 줄(만든 사람 · 버전)이 차지하는 높이 — 컨트롤을 그만큼 띄운다 */
   --foot: 18px;
+  /* 방향키는 3x3 이라 한 칸이 조이스틱 반지름보다 작다. 한 칸이 손끝(44px 이상)을
+     담도록 패드 전체를 키운다 — 가장 작은 화면에서 106 × 1.42 / 3 ≈ 50px. */
+  --dpad-scale: 1.42;
 
   --font-ko:"Pretendard","Noto Sans KR","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;
 }
@@ -150,37 +153,44 @@ body{
 body.scheme-stick #touchDpad,body.scheme-dpad #touchPad{display:none}
 body.no-pads #touchDpad,body.no-pads #touchPad,body.no-pads #touchJump{display:none}
 
-/* ---- 방향키 ----
- *  네모 네 칸을 45° 돌려 마름모로 세운다. 그러면 각 칸이 화면의 위·오른쪽·
- *  아래·왼쪽을 정확히 가리킨다 — 아이소메트릭 판에서 "화면 위"는 격자로는
- *  대각선이지만, 손가락에게 중요한 건 눈에 보이는 방향이다.
- *  글자는 다시 -45° 돌려 똑바로 세운다.
+/* ---- 방향키 — 여덟 방향을 한 칸씩 ----
+ *
+ *  3x3 격자의 가운데를 비우고 여덟 칸을 두른다. **칸의 자리가 곧 갈 방향**이라
+ *  화살표를 읽지 않아도 손이 먼저 안다. 네 칸을 두고 둘을 겹쳐 눌러 대각선을
+ *  만들던 방식은, 한 손가락으로는 두 칸을 함께 누르기 어려워 걷어냈다.
+ *
+ *  손가락 하나가 온전히 들어가야 하므로 조이스틱보다 크게 잡는다(--dpad-scale).
  */
 #touchDpad{
   position:absolute;z-index:7;
   left:calc(var(--ctrl-gap) + var(--sl));
   bottom:calc(var(--ctrl-gap) + var(--sb) + var(--foot));
-  width:var(--pad-size);height:var(--pad-size);
-  display:grid;grid-template:1fr 1fr / 1fr 1fr;gap:5px;
-  transform:rotate(45deg);touch-action:none;
+  width:calc(var(--pad-size) * var(--dpad-scale));height:calc(var(--pad-size) * var(--dpad-scale));
+  display:grid;grid-template:repeat(3,1fr) / repeat(3,1fr);gap:4px;
+  touch-action:none;
 }
 .dkey{
   display:grid;place-items:center;padding:0;
   background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.18);
-  backdrop-filter:blur(4px);border-radius:8px;
+  backdrop-filter:blur(4px);border-radius:10px;
   font-family:inherit;color:inherit;cursor:pointer;
-  /* 칸마다 따로 포인터를 받는다 — 두 칸을 함께 눌러야 대각선이 나오기 때문 */
+  /* 칸마다 따로 포인터를 받는다 — 어느 손가락이 어느 칸에 있는지로만 판정한다 */
   touch-action:none;-webkit-tap-highlight-color:transparent;
   transition:background .06s linear,border-color .06s linear;
 }
-/* 바깥쪽 모서리를 크게 굴려 전체가 하나의 마름모로 보이게 한다 */
-.dkey.up{border-top-left-radius:26px}
-.dkey.right{border-top-right-radius:26px}
-.dkey.left{border-bottom-left-radius:26px}
-.dkey.down{border-bottom-right-radius:26px}
+/* 자리 = 방향. 가운데(2/2)는 비워 둔다 */
+.dkey.nw{grid-area:1/1} .dkey.n{grid-area:1/2} .dkey.ne{grid-area:1/3}
+.dkey.w{grid-area:2/1}                         .dkey.e{grid-area:2/3}
+.dkey.sw{grid-area:3/1} .dkey.s{grid-area:3/2} .dkey.se{grid-area:3/3}
+/* 바깥 모서리를 크게 굴려 패드 전체가 하나의 덩어리로 보이게 한다 */
+.dkey.nw{border-top-left-radius:22px}
+.dkey.ne{border-top-right-radius:22px}
+.dkey.sw{border-bottom-left-radius:22px}
+.dkey.se{border-bottom-right-radius:22px}
+/* 대각선은 조금 흐리게 — 눈이 상하좌우부터 잡게 한다 */
+.dkey.nw span,.dkey.ne span,.dkey.sw span,.dkey.se span{opacity:.82}
 .dkey span{
-  transform:rotate(-45deg);          /* 마름모로 돌린 만큼 글자를 되돌린다 */
-  font-size:calc(var(--pad-size) * .17);color:rgba(255,255,255,.62);
+  font-size:calc(var(--pad-size) * .19);color:rgba(255,255,255,.66);
   line-height:1;pointer-events:none;
 }
 .dkey.on{background:rgba(255,214,107,.34);border-color:rgba(255,214,107,.85)}
@@ -229,7 +239,7 @@ body.no-pads #touchDpad,body.no-pads #touchPad,body.no-pads #touchJump{display:n
   /* HUD의 문제 문장을 가리지 않도록 화면 컨트롤 위쪽에 둔다 */
   position:fixed;z-index:30;pointer-events:none;
   left:calc(var(--ctrl-gap) + var(--sl));
-  bottom:calc(var(--ctrl-gap) + var(--sb) + var(--foot) + var(--pad-size) + 10px);
+  bottom:calc(var(--ctrl-gap) + var(--sb) + var(--foot) + var(--pad-size) * var(--dpad-scale) + 10px);
   max-width:min(340px,calc(100vw - 20px));
   padding:9px 12px;border-radius:12px;
   background:rgba(8,10,24,.86);border:1px solid rgba(255,255,255,.18);
