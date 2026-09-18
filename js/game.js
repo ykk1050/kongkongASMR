@@ -14,22 +14,30 @@ SK.Game = (function () {
   var GRID = 5;
   var START = { i: 2, j: 2 };
 
-  // 배경 바닥 재질 — 밟을 때마다 소리가 달라지도록 섞는다
-  var AMBIENT_MATS = [
-    'wood', 'keycap', 'cotton', 'leaf', 'bubble', 'sand',
-    'snow', 'glass', 'sponge', 'slime', 'orbeez', 'water',
-    'gravel', 'cookie', 'metal', 'paper', 'ice', 'wood',
-    'gravel', 'water', 'cookie', 'ice', 'paper', 'metal'
-  ];
+  /* 한 문제에 쓰는 재질은 **두 가지**다 — 글자 타일은 문제의 재질(`q.material`),
+   * 나머지 바닥은 전부 한 종류.
+   *
+   * 예전에는 칸마다 해시를 돌려 18종을 흩뿌렸다. 한 발짝 옮길 때마다 소리가 바뀌니
+   * 소리를 들으러 온 사람에게는 ASMR이 아니라 **효과음 모음집**이 된다. 한 재질에
+   * 몸을 담그려면 그 소리가 연달아 나야 한다.
+   *
+   * 대신 문제가 바뀔 때마다 바닥을 갈아 끼운다. 한 판을 도는 동안 18종을 다 만나되,
+   * 만나는 동안에는 끊기지 않는다. 가방에서 뽑아 쓰고 비면 다시 섞는 방식이라
+   * 같은 재질이 몰리거나 한 재질만 계속 빠지는 일이 없다. */
+  var floorMat = 'wood';
+  var floorBag = [];
 
-  /* 판을 새로 깔 때마다 바뀌는 씨앗.
-     이게 없으면 재질이 칸 좌표만으로 정해져, 새로 깔아도 늘 똑같은 그림이 된다. */
+  /* 판을 새로 깔 때마다 바뀌는 씨앗 — 이어하기에 저장해 두고 그대로 복원한다 */
   var boardSeed = (Math.random() * 0x7fffffff) | 0;
 
-  function ambientMat(i, j) {
-    var h = (i * 73856093) ^ (j * 19349663) ^ (boardSeed * 83492791);
-    h = (h ^ (h >>> 13)) >>> 0;
-    return AMBIENT_MATS[h % AMBIENT_MATS.length];
+  /** 다음 바닥 재질 — 글자 재질(avoid)과 직전 바닥은 피한다(그래야 '두 가지'가 된다) */
+  function drawFloorMat(avoid) {
+    for (var guard = 0; guard < 64; guard++) {
+      if (!floorBag.length) floorBag = SK.Quiz.shuffle(Object.keys(SK.Tiles.MATERIALS));
+      var m = floorBag.pop();
+      if (m !== avoid && m !== floorMat) return m;
+    }
+    return floorMat;
   }
 
   var cv, ctx, W = 0, H = 0, dpr = 1, scale = 1;
@@ -260,7 +268,7 @@ SK.Game = (function () {
     tiles = []; tileAt = {};
     for (var i = 0; i < GRID; i++) {
       for (var j = 0; j < GRID; j++) {
-        var t = SK.Tiles.make(i, j, ambientMat(i, j));
+        var t = SK.Tiles.make(i, j, floorMat);
         tiles.push(t);
         tileAt[i + ',' + j] = t;
       }
@@ -401,6 +409,9 @@ SK.Game = (function () {
     run.quizzes++;
     quizTouched = false;
     fsm.setQuiz(q);
+    /* 바닥 재질은 판을 깔기 **전에** 정한다. 나중에 갈아 끼우면 재질마다 두께가
+       달라서 캐릭터가 공중에 뜨거나 파묻힌다(refreshBoard 가 발밑 높이를 이미 맞춰 둔 뒤다). */
+    floorMat = drawFloorMat(q.material);
     refreshBoard();          // 앞 문제에서 부서진 자리를 물려받지 않는다
     layoutQuiz(q);
     phase = 'play';
@@ -409,13 +420,13 @@ SK.Game = (function () {
     saveNow(true);
   }
 
-  /** 문제 타일을 바닥에 뿌린다 (판은 refreshBoard 가 이미 새로 깔아 두었다) */
+  /** 문제 타일을 바닥에 뿌린다 (판은 refreshBoard 가 이미 바닥 재질로 깔아 두었다) */
   function layoutQuiz(q) {
     for (var k = 0; k < quizTiles.length; k++) {
       var old = quizTiles[k];
       old.label = null; old.role = 'plain'; old.payload = null;
       old.state = 'idle'; old.order = -1; old.correct = false;
-      old.mat = ambientMat(old.i, old.j);
+      SK.Tiles.retexture(old, floorMat);
     }
     quizTiles = [];
 
@@ -539,13 +550,13 @@ SK.Game = (function () {
     if (at >= 0) quizTiles.splice(at, 1);
     t.label = null; t.payload = null; t.role = 'plain';
     t.order = -1; t.correct = false; t.state = 'idle';
-    t.mat = ambientMat(t.i, t.j);
+    SK.Tiles.retexture(t, floorMat);
   }
 
   function putLabel(t, it, mat) {
     t.label = it.label; t.payload = it.token; t.role = 'seq';
     t.order = it.order; t.correct = it.correct; t.state = 'idle';
-    t.mat = mat;
+    SK.Tiles.retexture(t, mat);
     quizTiles.push(t);
   }
 
@@ -589,12 +600,13 @@ SK.Game = (function () {
         if (o === t || o.label || !SK.Tiles.isSolid(o)) continue;
         if (o.i === player.ci && o.j === player.cj) continue;
         if (!touchesRoad(o.i, o.j, road)) continue;
-        o.label = t.label; o.payload = t.payload; o.mat = t.mat;
+        o.label = t.label; o.payload = t.payload;
+        SK.Tiles.retexture(o, t.mat);
         o.role = 'seq'; o.order = t.order; o.correct = t.correct; o.state = t.state;
         quizTiles[k] = o;
         t.label = null; t.payload = null; t.role = 'plain';
         t.order = -1; t.correct = false; t.state = 'idle';
-        t.mat = ambientMat(t.i, t.j);
+        SK.Tiles.retexture(t, floorMat);
         break;
       }
     }
@@ -1629,6 +1641,16 @@ SK.Game = (function () {
     }
     if (!tiles.length) return false;
 
+    /* 되살린 판의 바닥 재질을 되찾는다 — 글자 없는 칸 중 가장 많은 재질이 바닥이다.
+       이걸 빠뜨리면 이어하기 직후 글자를 뗀 자리만 엉뚱한 재질이 되어, 한 문제에
+       재질이 셋 나온다. */
+    var tally = Object.create(null), top = 0;
+    for (n = 0; n < tiles.length; n++) {
+      if (tiles[n].label) continue;
+      var c = (tally[tiles[n].mat] = (tally[tiles[n].mat] || 0) + 1);
+      if (c > top) { top = c; floorMat = tiles[n].mat; }
+    }
+
     // 문제 차례 — 저장된 순서 그대로 이어 간다
     session.setFilter(typeof snap.filter === 'string' ? snap.filter : 'all');
     var queue = [];
@@ -2039,6 +2061,16 @@ SK.Game = (function () {
         return { mat: t.mat, damage: t.damage, broken: t.broken, label: t.label, solid: SK.Tiles.isSolid(t) };
       },
       solidCount: solidCount,
+      /** 지금 판에 깔린 재질 — 한 문제에 두 가지만 나와야 한다 */
+      matMix: function () {
+        var count = Object.create(null), out = [];
+        for (var k = 0; k < tiles.length; k++) {
+          count[tiles[k].mat] = (count[tiles[k].mat] || 0) + 1;
+        }
+        for (var m in count) out.push({ mat: m, tiles: count[m] });
+        out.sort(function (a, b) { return b.tiles - a.tiles; });
+        return { floor: floorMat, kinds: out.length, mats: out };
+      },
       /** 지금 판에서 정답을 순서대로 밟으러 갈 길이 있는가 */
       pathOk: roadOk,
       letterCount: function () { return quizTiles.length; },

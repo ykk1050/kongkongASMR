@@ -227,6 +227,25 @@ SK.Tiles = (function () {
     t.cracks = lines;
   }
 
+  /**
+   * 타일의 재질을 갈아 끼운다.
+   *
+   * 닳은 정도(`damage`)는 그 **칸의 이력**이라 그대로 둔다. 새 재질이라고 0으로
+   * 되돌리면 닳던 발판이 문제마다 새것이 되어, "부서진 타일은 되살아나지 않는다"는
+   * 규칙이 사실상 무력해진다. 남은 횟수는 내구도 점으로 늘 보이므로 숨겨지지도 않는다.
+   * 다만 금은 재질마다 그리는 법이 달라(에어캡은 금이 안 간다) 다시 만들어 준다.
+   *
+   * 부서진 자리는 **재질까지 그대로** 둔다. 구멍 테두리에 남은 파편과 먼지 색이
+   * 거기서 무엇이 깨졌는지 말해 주는데, 바닥이 바뀔 때마다 같이 칠해 버리면
+   * 그 흔적이 지워진다.
+   */
+  function retexture(t, mat) {
+    if (!t || t.mat === mat || t.broken > 0) return t;
+    t.mat = mat;
+    buildCracks(t);
+    return t;
+  }
+
   function update(t, dt) {
     if (t.press !== 0 || t.pressVel !== 0) {
       var k = 165, damp = 15;
@@ -1622,6 +1641,7 @@ SK.Tiles = (function () {
     material: material,
     isConsumable: isConsumable,
     make: make,
+    retexture: retexture,
     stomp: stomp,
     update: update,
     draw: draw,
