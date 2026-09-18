@@ -142,23 +142,45 @@
     setMenu(false);
   });
 
-  /* ---------- 소리 / 방향 패드 ---------- */
+  /* ---------- 소리 / 화면 컨트롤 ---------- */
   var btnMute = $('btnMute');
   btnMute.addEventListener('click', function () {
     var m = SK.Audio.setMuted(!SK.Audio.isMuted());
     btnMute.textContent = m ? '🔇 소리 켜기' : '🔊 소리 끄기';
   });
 
-  // 방향 패드 표시 여부 — 터치 기기는 기본 켜짐, 마우스 전용 기기는 기본 꺼짐
+  /* 화면 컨트롤 — 켜고 끄기, 그리고 방향키 / 조이스틱 중 고르기.
+     손에 맞는 게 사람마다 달라서 둘 다 두고 고르게 한다. 고른 값은 기억해 둔다 —
+     매번 메뉴를 열어 다시 고르게 하면 고를 수 있다는 것 자체가 짐이 된다. */
+  var SCHEME_KEY = 'sk.scheme.v1';
+  // 터치 기기는 기본 켜짐, 마우스 전용 기기는 기본 꺼짐
   var touchCapable = (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
   var padsOn = touchCapable;
-  var btnPads = $('btnPads');
+  var scheme = 'dpad';
+  try {
+    var saved = localStorage.getItem(SCHEME_KEY);
+    if (saved === 'dpad' || saved === 'stick') scheme = saved;
+  } catch (e) { /* 기억하지 못해도 기본값으로 굴러간다 */ }
+
+  var btnPads = $('btnPads'), btnScheme = $('btnScheme');
   function applyPads() {
     document.body.classList.toggle('no-pads', !padsOn);
-    btnPads.textContent = padsOn ? '🎮 방향 패드 끄기' : '🎮 방향 패드 켜기';
-    SK.Game.relayout();      // 컨트롤이 사라지면 보드를 더 크게 그린다
+    document.body.classList.toggle('scheme-dpad', scheme === 'dpad');
+    document.body.classList.toggle('scheme-stick', scheme === 'stick');
+    btnPads.textContent = padsOn ? '🎮 화면 컨트롤 끄기' : '🎮 화면 컨트롤 켜기';
+    btnScheme.textContent = scheme === 'dpad' ? '🕹 조이스틱으로 바꾸기' : '✛ 방향키로 바꾸기';
+    btnScheme.disabled = !padsOn;
+    // 누른 채로 바뀌면 그 방향이 눌린 채 남는다
+    if (SK.Game.clearTouchInput) SK.Game.clearTouchInput();
+    SK.Game.relayout();      // 컨트롤이 바뀌거나 사라지면 보드 크기를 다시 잡는다
   }
   btnPads.addEventListener('click', function () { SK.Audio.ui(); padsOn = !padsOn; applyPads(); });
+  btnScheme.addEventListener('click', function () {
+    SK.Audio.ui();
+    scheme = scheme === 'dpad' ? 'stick' : 'dpad';
+    try { localStorage.setItem(SCHEME_KEY, scheme); } catch (e2) { /* 기억 못 해도 그만 */ }
+    applyPads();
+  });
 
 
   /* 입력 진단 — 키가 브라우저에 실제로 도착하는지 보여 준다 */

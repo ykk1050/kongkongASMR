@@ -1,6 +1,6 @@
 /* =============================================================
  *  소리 콩콩 — 레이아웃
- *  원칙: HUD(문제) · 보드 · 방향 패드는 절대 서로를 가리지 않는다.
+ *  원칙: HUD(문제) · 보드 · 화면 컨트롤은 절대 서로를 가리지 않는다.
  *        HUD와 컨트롤은 화면 가장자리에 고정되고,
  *        캔버스는 남은 "안전 영역"을 JS에서 측정해 보드를 그 안에 맞춘다.
  * ============================================================= */
@@ -112,6 +112,8 @@ body{
 .ctl.wide{width:100%;text-align:left}
 .ctl:active{background:rgba(255,255,255,.24)}
 .ctl.active{background:var(--accent);color:#2a2410;border-color:transparent}
+/* 컨트롤을 꺼 두면 방향키/조이스틱 고르기도 의미가 없다 — 눌러도 안 되는 티를 낸다 */
+.ctl:disabled{opacity:.42;cursor:default}
 .menu-note{margin:2px 0 0;font-size:11px;color:var(--dim);line-height:1.6}
 .menu-note b{color:var(--ink)}
 
@@ -140,8 +142,15 @@ body{
   flex:0 0 auto;
 }
 
-/* ================= 방향 패드 / 점프 =================
+/* ================= 화면 컨트롤 (방향키 · 조이스틱) / 점프 =================
  *
+ *  손에 맞는 컨트롤은 사람마다 달라서 둘 다 두고 메뉴에서 고른다.
+ *  body 에 scheme-dpad / scheme-stick 중 하나가 붙고, no-pads 면 둘 다 숨는다.
+ */
+body.scheme-stick #touchDpad,body.scheme-dpad #touchPad{display:none}
+body.no-pads #touchDpad,body.no-pads #touchPad,body.no-pads #touchJump{display:none}
+
+/* ---- 방향키 ----
  *  네모 네 칸을 45° 돌려 마름모로 세운다. 그러면 각 칸이 화면의 위·오른쪽·
  *  아래·왼쪽을 정확히 가리킨다 — 아이소메트릭 판에서 "화면 위"는 격자로는
  *  대각선이지만, 손가락에게 중요한 건 눈에 보이는 방향이다.
@@ -156,9 +165,12 @@ body{
   transform:rotate(45deg);touch-action:none;
 }
 .dkey{
-  display:grid;place-items:center;
+  display:grid;place-items:center;padding:0;
   background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.18);
   backdrop-filter:blur(4px);border-radius:8px;
+  font-family:inherit;color:inherit;cursor:pointer;
+  /* 칸마다 따로 포인터를 받는다 — 두 칸을 함께 눌러야 대각선이 나오기 때문 */
+  touch-action:none;-webkit-tap-highlight-color:transparent;
   transition:background .06s linear,border-color .06s linear;
 }
 /* 바깥쪽 모서리를 크게 굴려 전체가 하나의 마름모로 보이게 한다 */
@@ -173,6 +185,33 @@ body{
 }
 .dkey.on{background:rgba(255,214,107,.34);border-color:rgba(255,214,107,.85)}
 .dkey.on span{color:#fff}
+/* ---- 조이스틱 ---- */
+#touchPad{
+  position:absolute;z-index:7;
+  left:calc(var(--ctrl-gap) + var(--sl));
+  bottom:calc(var(--ctrl-gap) + var(--sb) + var(--foot));
+  width:var(--pad-size);height:var(--pad-size);border-radius:50%;
+  background:rgba(255,255,255,.07);border:2px solid rgba(255,255,255,.16);
+  display:grid;place-items:center;touch-action:none;
+  backdrop-filter:blur(4px);
+}
+/* 손가락이 테두리를 살짝 빗나가도 잡히도록 히트 영역을 넓힌다 */
+#touchPad::before{content:'';position:absolute;inset:-20px;border-radius:50%}
+#touchPad.active{background:rgba(255,255,255,.13);border-color:rgba(255,214,107,.6)}
+#touchNub{
+  grid-area:1/1;
+  width:calc(var(--pad-size) * .4);height:calc(var(--pad-size) * .4);border-radius:50%;
+  background:rgba(255,255,255,.34);border:1px solid rgba(255,255,255,.4);
+  pointer-events:none;transition:transform .05s linear;
+}
+/* 여덟 방향 중 실제로 확정된 칸을 패드 위에 점으로 알려 준다 */
+#touchAim{
+  grid-area:1/1;
+  width:14px;height:14px;border-radius:50%;
+  background:var(--aim,#5df0ff);box-shadow:0 0 10px 2px rgba(93,240,255,.75);
+  pointer-events:none;opacity:0;transition:transform .07s ease-out,opacity .12s linear;
+}
+
 #touchJump{
   position:absolute;z-index:7;
   right:calc(var(--ctrl-gap) + var(--sr));
@@ -183,11 +222,11 @@ body{
   box-shadow:0 6px 18px rgba(0,0,0,.35);
 }
 #touchJump.active{transform:scale(.93);background:#ffc233}
-body.no-pads #touchDpad,body.no-pads #touchJump{display:none}
+
 
 /* 입력 진단 패널 — 키가 실제로 도착하는지 보여 준다 */
 #inputDiag{
-  /* HUD의 문제 문장을 가리지 않도록 방향 패드 위쪽에 둔다 */
+  /* HUD의 문제 문장을 가리지 않도록 화면 컨트롤 위쪽에 둔다 */
   position:fixed;z-index:30;pointer-events:none;
   left:calc(var(--ctrl-gap) + var(--sl));
   bottom:calc(var(--ctrl-gap) + var(--sb) + var(--foot) + var(--pad-size) + 10px);
