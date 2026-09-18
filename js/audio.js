@@ -906,24 +906,108 @@ SK.Audio = (function () {
    *  퀴즈 피드백
    * ======================================================= */
 
-  /** 오답 — 둔탁하지만 불쾌하지 않게 */
+  /* 실패는 두 가지다 — **틀리게 밟은 것**과 **딛을 데가 없어 빠진 것**.
+   * 둘은 플레이어가 저지른 일이 다르므로 소리도 달라야 한다. 같은 소리를 쓰면
+   * "왜 깎였지?"를 화면에서 찾아야 하는데, 발밑에서 벌어진 일은 귀가 먼저 안다.
+   *
+   * 공통으로 지키는 것 — **아래로 내려가고, 어둡고, 반짝이는 성분이 없다.**
+   * 그래야 잘못됐다는 느낌이 든다. 다만 ASMR 게임이라 날카롭게 찌르지 않는다.
+   * 둘을 가르는 축은 **거리와 길이**다.
+   *   · 오답: 가깝고 짧고 건조하다. 벽에 부딪힌 것처럼 그 자리에서 끝난다
+   *   · 추락: 멀고 길고 젖어 있다. 소리가 나를 두고 아래로 내려간다
+   */
+
+  /** 오답 — 가까이서 툭 막히는 두 음. 둔탁하지만 불쾌하지 않게 */
   function wrong(o) {
     if (!ready || muted) return;
     o = o || {};
-    var d = spatial(o.pan || 0, 0.2, 0.12);
+    var d = spatial(o.pan || 0, 0.2, 0.14);
+    var D = spatialTrio(o.pan || 0, 0.2, 0.14, 0.2);
     var t = ctx.currentTime + 0.001;
     if (samples['quiz_wrong']) { playSample('quiz_wrong', d, t, 1, 1); return; }
 
-    noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 420, gain: 0.085, dur: 0.16, attack: 0.006 });
+    // 1) 두툼한 것에 막히는 순간 — 고역이 없어야 '막혔다'로 들린다
+    noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 380, gain: 0.085, dur: 0.14, attack: 0.005 });
+
+    // 2) 눌린 몸통. 비조화비라 음정이 잡히지 않아 '음악'이 되지 않는다
     modalVoice({
-      dest: d, t: t, base: 98, gain: 0.13, jitter: 0.02,
+      dest: d, t: t, base: 104, gain: 0.125, jitter: 0.02,
       modes: [
-        { f: 1.00, d: 0.3, g: 1.00, a: 0.004 },
-        { f: 1.41, d: 0.18, g: 0.32 },
-        { f: 2.13, d: 0.09, g: 0.12 }
+        { f: 1.00, d: 0.24, g: 1.00, a: 0.004 },
+        { f: 1.37, d: 0.15, g: 0.34 },
+        { f: 2.09, d: 0.08, g: 0.12 }
       ]
     });
-    toneVoice({ dest: d, t: t + 0.03, freq: 92, freqEnd: 58, type: 'sine', gain: 0.07, dur: 0.28, lp: 220 });
+
+    // 3) 내려앉는 두 음(F3 → C3). '아니야'라고 읽히는 건 이 계단이다.
+    //    글리산도로 미끄러뜨리면 추락과 헷갈리므로, 딱 두 계단으로 끊는다.
+    toneVoice({ dest: d, t: t, freq: 174.61, type: 'triangle', gain: 0.075, dur: 0.12, lp: 460 });
+    toneVoice({ dest: d, t: t + 0.09, freq: 130.81, type: 'triangle', gain: 0.09, dur: 0.26, lp: 400 });
+
+    // 4) 손끝이 스치는 결 — 이게 없으면 그냥 '삑' 소리가 된다
+    granular({
+      dests: D, t: t + 0.01, count: 9, span: 0.11,
+      freq: [520, 2000], q: 4, gain: 0.02, grain: [0.004, 0.016], decay: 1.5
+    });
+  }
+
+  /** 발밑이 꺼져 아래로 빠질 때 — 소리가 나를 두고 내려간다 */
+  function fall(o) {
+    if (!ready || muted) return;
+    o = o || {};
+    var pan = o.pan || 0;
+    // depth 를 크게 줘서 패너가 멀리 보내고 잔향을 많이 먹인다 — '아래'는 곧 '멀리'다
+    var d = spatial(pan, 0.85, 0.62);
+    var D = spatialTrio(pan, 0.85, 0.62, 0.34);
+    var t = ctx.currentTime + 0.001;
+    if (samples['quiz_fall']) { playSample('quiz_fall', d, t, 1, 1); return; }
+
+    // 1) 발판이 꺼지는 순간 — 짧고 낮은 '푹'
+    noiseVoice({ dest: d, t: t, filter: 'lowpass', freq: 240, gain: 0.1, dur: 0.1, attack: 0.006 });
+
+    // 2) 떨어지는 동안의 하강. 두 성부가 같은 비율로 같이 내려가면 '한 덩어리가
+    //    내려간다'로 들리고, 한 음만 내려가면 사이렌이 된다.
+    toneVoice({ dest: d, t: t, freq: 196, freqEnd: 49, type: 'sine', gain: 0.14, dur: 0.6, lp: 300 });
+    toneVoice({ dest: d, t: t + 0.02, freq: 293, freqEnd: 73, type: 'triangle', gain: 0.042, dur: 0.55, lp: 340 });
+
+    // 3) 스치는 공기 — 천천히 차올랐다 잦아든다(attack 을 길게 준 이유)
+    noiseVoice({
+      dest: d, t: t + 0.01, filter: 'bandpass',
+      freq: 900, freqEnd: 170, q: 0.9, gain: 0.05, dur: 0.5, attack: 0.09
+    });
+
+    // 4) 바닥이 없다 — 아주 낮은 모달이 길게 남아 빈 공간을 만든다
+    modalVoice({
+      dest: d, t: t + 0.06, base: 58, gain: 0.095, jitter: 0.01,
+      modes: [
+        { f: 1.00, d: 0.72, g: 1.00, a: 0.05 },
+        { f: 1.83, d: 0.4, g: 0.26 }  // 비조화 — 음정이 잡히면 '끝났다'가 아니라 '음악'이 된다
+      ]
+    });
+
+    // 5) 같이 떨어져 흩어지는 부스러기 — 멀어질수록 성기게
+    granular({
+      dests: D, t: t + 0.05, count: 16, span: 0.46,
+      freq: [380, 1500], q: 3, gain: 0.022, grain: [0.006, 0.022], decay: 2.2
+    });
+  }
+
+  /** 목숨을 다 잃었을 때 — 오답도 추락도 아닌, 끝났다는 신호 */
+  function over(o) {
+    if (!ready || muted) return;
+    o = o || {};
+    var d = spatial(o.pan || 0, 0.6, 0.7);
+    var t = ctx.currentTime + 0.001;
+    // 단3도로 내려앉는 두 음을 길게. 바로 앞에 울린 실패음과 겹치지 않게 조금 늦춘다.
+    modalVoice({
+      dest: d, t: t + 0.12, base: 110, gain: 0.1,
+      modes: [{ f: 1.0, d: 0.9, g: 1.0, a: 0.02 }, { f: 2.0, d: 0.5, g: 0.18 }]
+    });
+    modalVoice({
+      dest: d, t: t + 0.42, base: 92.5, gain: 0.11,
+      modes: [{ f: 1.0, d: 1.4, g: 1.0, a: 0.03 }, { f: 2.0, d: 0.7, g: 0.16 }]
+    });
+    noiseVoice({ dest: d, t: t + 0.12, filter: 'lowpass', freq: 300, gain: 0.05, dur: 0.3, attack: 0.03 });
   }
 
   /** 새 문제 등장 */
@@ -1091,6 +1175,34 @@ SK.Audio = (function () {
     });
   }
 
+  /**
+   * 소리 하나의 **K-가중 포락선**을 재서 돌려준다 (개발용).
+   *
+   * peak() 로 실패음 같은 걸 보면 안 된다 — 피크 미터는 앞머리 트랜지언트만
+   * 크게 읽어서, 길게 깔리는 소리를 "짧고 작다"고 잘못 말한다. 오답음과 추락음이
+   * 실제로 다른 모양인지 확인하려면 여기서 나오는 곡선을 봐야 한다.
+   *
+   * @param {Function} fire 소리를 내는 함수
+   * @param {number} [ms] 재는 시간 (기본 1500ms)
+   * @returns {Promise<number[]>} 8ms 간격 K-가중 RMS
+   */
+  function envelope(fire, ms) {
+    if (!ready) init();
+    var an = kMeter(), span = ms || 1500, out = [];
+    return new Promise(function (done) {
+      fire();
+      var t0 = performance.now();
+      (function poll() {
+        an.getFloatTimeDomainData(kBuf);
+        var s = 0;
+        for (var i = 0; i < kBuf.length; i++) s += kBuf[i] * kBuf[i];
+        out.push(Math.sqrt(s / kBuf.length));
+        if (performance.now() - t0 < span) { setTimeout(poll, 8); return; }
+        done(out);
+      })();
+    });
+  }
+
   /** 마스터 출력의 순간 피크(0~1). 헤드룸이 얼마나 남았는지 볼 때 쓴다. */
   var peakBuf = null;
   function peak() {
@@ -1150,8 +1262,11 @@ SK.Audio = (function () {
     getLevel: getLevel,
     loudness: loudness,
     loudnessTable: loudnessTable,
+    envelope: envelope,
     peak: peak,
     wrong: wrong,
+    fall: fall,
+    over: over,
     newQuiz: newQuiz,
     ui: ui,
     registerSampleMap: registerSampleMap,

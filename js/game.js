@@ -1393,7 +1393,7 @@ SK.Game = (function () {
     score = Math.max(0, score - FALL_PENALTY);
 
     var pan = panOf(i, j);
-    SK.Audio.hollow({ pan: pan });
+    SK.Audio.fall({ pan: pan });
     SK.Particles.text(i, j, '앗!', { size: 28, color: '#ff9aa8', life: 0.9, gz: 0.2, vz: 0.02 });
     SK.Particles.text(i, j, '-' + FALL_PENALTY, { size: 20, color: '#ff9aa8', life: 1.0, gz: 0.7, vz: 0.03 });
     SK.Particles.ring(i, j, { size: 110, life: 0.6, width: 3, color: 'rgba(255,154,168,' });
@@ -1465,7 +1465,7 @@ SK.Game = (function () {
     phaseTimer = 0;
     lives = 0;
     renderLives();
-    SK.Audio.wrong({ pan: 0 });
+    SK.Audio.over({ pan: 0 });
     SK.Particles.text(player.ci, player.cj, 'GAME OVER', {
       size: 34, color: '#ff9aa8', life: 2.2, gz: 1.2, vz: 0.02
     });

@@ -177,9 +177,8 @@
     order.forEach(function (key) {
       var m = SK.Tiles.MATERIALS[key];
       if (!m) return;
-      var btn = document.createElement('button');
+      var btn = document.createElement('div');
       btn.className = 'legend-item';
-      btn.type = 'button';
 
       var cv = document.createElement('canvas');
       var dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -204,7 +203,6 @@
       btn.appendChild(name);
       btn.appendChild(sound);
       btn.appendChild(hits);
-      btn.addEventListener('click', function () { SK.Audio.preview(key); });
       list.appendChild(btn);
     });
   });
