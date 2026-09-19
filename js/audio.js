@@ -1010,6 +1010,31 @@ SK.Audio = (function () {
     noiseVoice({ dest: d, t: t + 0.12, filter: 'lowpass', freq: 300, gain: 0.05, dur: 0.3, attack: 0.03 });
   }
 
+  /**
+   * 하트를 먹었을 때 — 목숨 하나를 되찾는 드문 순간.
+   *
+   * 정답에는 일부러 소리를 쓰지 않는다(발소리 ASMR을 덮기 때문). 하트는 한 판에
+   * 몇 번 없는 일이라 예외로 두되, 짧고 부드럽게 올라가는 두 음까지만 쓴다.
+   * 실패음이 아래로 내려가는 것과 반대 방향이라 뜻이 바로 읽힌다.
+   */
+  function heart(o) {
+    if (!ready || muted) return;
+    o = o || {};
+    var d = spatial(o.pan || 0, 0.25, 0.5);
+    var t = ctx.currentTime + 0.001;
+    // 완전5도로 올라가는 두 음(A5 → E6). 조화비라 맑게 들린다
+    modalVoice({
+      dest: d, t: t, base: 880, gain: 0.075,
+      modes: [{ f: 1.0, d: 0.5, g: 1.0 }, { f: 2.0, d: 0.22, g: 0.16 }]
+    });
+    modalVoice({
+      dest: d, t: t + 0.085, base: 1318.51, gain: 0.08,
+      modes: [{ f: 1.0, d: 0.7, g: 1.0 }, { f: 2.0, d: 0.3, g: 0.14 }]
+    });
+    // 반짝이는 결 — 소리에 '얻었다'는 질감을 준다
+    noiseVoice({ dest: d, t: t + 0.02, filter: 'bandpass', freq: 5200, q: 3, gain: 0.02, dur: 0.1, attack: 0.01 });
+  }
+
   /** 새 문제 등장 */
   function newQuiz() {
     if (!ready || muted) return;
@@ -1267,6 +1292,7 @@ SK.Audio = (function () {
     wrong: wrong,
     fall: fall,
     over: over,
+    heart: heart,
     newQuiz: newQuiz,
     ui: ui,
     registerSampleMap: registerSampleMap,

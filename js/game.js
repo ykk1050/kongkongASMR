@@ -163,6 +163,15 @@ SK.Game = (function () {
    *  실패다 — 답을 틀렸을 때, 빈 칸에 빠졌을 때, 밟은 타일이 부서져 떨어졌을 때.
    *  (뒤의 둘은 이미 fallIntoHole 로 모이므로 거기 한 군데만 걸면 된다.) */
   var MAX_LIVES = 5;
+
+  /* 하트 — 목숨을 하나 되찾는 기회.
+   *
+   *  늘 나오면 목숨이 의미를 잃고, 안 나오면 한 번 삐끗한 판은 그대로 끝난다.
+   *  그래서 **몇 문제에 한 번 확률로** 굴린다. 목숨이 가득하면 굴리지 않는다 —
+   *  더 채울 수 없는 걸 띄워 놓으면 "먹어도 아무 일 없는 것"이 되기 때문이다. */
+  var HEART_EVERY = 3;        // 이 문제 수마다 한 번 기회를 굴린다
+  var HEART_CHANCE = 0.55;    // 굴렸을 때 실제로 나올 확률
+  var heartAt = null;         // {i,j} — 지금 하트가 놓인 칸 (없으면 null)
   var lives = MAX_LIVES;
   var phase = 'idle';                      // idle | play | wrong | solved | over
   var phaseTimer = 0;
@@ -413,6 +422,7 @@ SK.Game = (function () {
     floorMat = drawFloorMat(q.material);
     refreshBoard();          // 앞 문제에서 부서진 자리를 물려받지 않는다
     layoutQuiz(q);
+    maybeSpawnHeart();
     phase = 'play';
     SK.Audio.newQuiz();
     renderHUD(true);
@@ -465,10 +475,82 @@ SK.Game = (function () {
     for (var d = 0; d < items.length; d++) {
       if (!items[d].correct) placeItem(items[d], spots, q);
     }
+
+    keepHeartValid();
   }
 
   function clearAllLabels() {
     for (var k = quizTiles.length - 1; k >= 0; k--) stripLabel(quizTiles[k]);
+  }
+
+  /* =========================================================
+   *  하트 — 목숨 하나를 되찾는 칸
+   * ======================================================= */
+
+  /**
+   * 하트를 놓을 수 있는 칸인가.
+   *
+   *  · 글자가 얹힌 칸은 뺀다. 오답 위에 놓으면 하트를 먹으러 가다 목숨을 잃는
+   *    덫이 되고, 정답 위에 놓으면 문제 진행과 보상이 한 번에 일어나 뭘 얻었는지
+   *    알 수 없다. 글자가 없는 디딤 타일이면 둘 다 아니다.
+   *  · 구멍과 부서진 자리는 애초에 딛을 수가 없다.
+   *  · 지금 서 있는 칸도 뺀다 — 놓자마자 먹히면 기회가 아니라 그냥 지급이다.
+   */
+  function heartOk(t) {
+    return !!t && !t.label && SK.Tiles.isSolid(t) &&
+           !(player && t.i === player.ci && t.j === player.cj);
+  }
+
+  /** 지금 판에서 하트를 놓을 수 있는 칸들 */
+  function heartCells() {
+    var out = [];
+    for (var k = 0; k < tiles.length; k++) if (heartOk(tiles[k])) out.push(tiles[k]);
+    return out;
+  }
+
+  /** 새 문제를 깔 때 한 번 — 이번 판에 하트를 띄울지 정한다 */
+  function maybeSpawnHeart() {
+    heartAt = null;
+    if (lives >= MAX_LIVES) return;                     // 더 채울 데가 없다
+    if (run.quizzes % HEART_EVERY !== 0) return;
+    if (Math.random() >= HEART_CHANCE) return;
+    placeHeart();
+  }
+
+  /** 놓을 수 있는 칸 중 하나를 무작위로 */
+  function placeHeart() {
+    var cells = heartCells();
+    if (!cells.length) { heartAt = null; return; }
+    var t = cells[Math.floor(Math.random() * cells.length)];
+    heartAt = { i: t.i, j: t.j };
+  }
+
+  /* 판을 다시 깔면(화면 크기 변경·이어하기) 하트가 놓였던 칸에 글자가 올라올 수
+     있다. 그러면 자리를 옮긴다 — 글자 위에 남겨 두면 덫이 된다. */
+  function keepHeartValid() {
+    if (!heartAt) return;
+    if (heartOk(getTile(heartAt.i, heartAt.j))) return;
+    placeHeart();
+  }
+
+  /** 하트를 밟았다 — 목숨 하나를 되찾는다 */
+  function takeHeart(i, j) {
+    heartAt = null;
+    var full = lives >= MAX_LIVES;
+    if (!full) lives += 1;
+    renderLives();
+    if (ui.hearts) {
+      ui.hearts.classList.remove('gain');
+      void ui.hearts.offsetWidth;          // 애니메이션 재시작
+      ui.hearts.classList.add('gain');
+    }
+    SK.Audio.heart({ pan: panOf(i, j) });
+    SK.Particles.text(i, j, full ? '가득!' : '♥ +1', {
+      size: 28, color: '#ff8fb0', life: 1.1, gz: 0.9, vz: 0.05
+    });
+    SK.Particles.ring(i, j, { size: 120, life: 0.6, width: 3, color: 'rgba(255,143,176,' });
+    setFlash(0.16, 344);
+    saveNow(true);
   }
 
   /* =========================================================
@@ -1380,6 +1462,8 @@ SK.Game = (function () {
       SK.Particles.text(i, j, '쿵!', { size: 24, color: '#ffffff', life: 0.6, gz: 0.4, vz: 0.03 });
     }
 
+    if (heartAt && heartAt.i === i && heartAt.j === j) takeHeart(i, j);
+
     visit(t);
 
     if (res.sound === 'shatter') {
@@ -1654,6 +1738,7 @@ SK.Game = (function () {
   /** 처음부터 다시 — 점수·목숨·보드·문제를 전부 새로 만든다 */
   function restart() {
     if (ui.overPanel) ui.overPanel.hidden = true;
+    heartAt = null;
     // 다음 게임 오버는 다시 풀이부터 — 여기서 되돌려 놓지 않으면 성적이 먼저 뜬다
     if (ui.overReveal) ui.overReveal.hidden = false;
     if (ui.overResult) ui.overResult.hidden = true;
@@ -1729,6 +1814,7 @@ SK.Game = (function () {
       touched: quizTouched ? 1 : 0,
       auth: runAuth,
       seed: boardSeed,
+      heart: heartAt ? [heartAt.i, heartAt.j] : null,
       quizId: fsm.quiz.id,
       progress: fsm.progress.slice(),
       attempts: fsm.attempts, mistakes: fsm.mistakes,
@@ -1780,6 +1866,8 @@ SK.Game = (function () {
     GRID = snap.grid;
     START = { i: snap.start.i, j: snap.start.j };
     if (snap.seed != null) boardSeed = snap.seed | 0;
+    heartAt = (Array.isArray(snap.heart) && snap.heart.length === 2)
+      ? { i: snap.heart[0] | 0, j: snap.heart[1] | 0 } : null;
 
     tiles = []; tileAt = {}; quizTiles = [];
     for (n = 0; n < snap.tiles.length; n++) {
@@ -2092,6 +2180,63 @@ SK.Game = (function () {
     ui.timeVal.textContent = SK.Ranking.fmtTime(run.timeMs);
   }
 
+  /**
+   * 하트를 타일 위에 띄워 그린다.
+   *
+   *  · 위아래로 천천히 떠다니고 맥박처럼 커졌다 작아진다 — 판의 다른 것들은
+   *    밟기 전까지 가만히 있으므로, 움직이는 것 하나만으로 눈이 먼저 간다.
+   *  · 바닥에 그림자를 깔아 **어느 칸 위인지**를 분명히 한다. 공중에 떠 있는
+   *    그림만 있으면 아이소메트릭에서는 한 칸 뒤의 타일처럼 보인다.
+   */
+  function drawHeart(ctx, x, y) {
+    var SIZE = 1.5;                       // 타일 무늬에 묻히지 않을 만큼 크게
+    var bob = Math.sin(now * 2.2) * 5;
+    var pulse = SIZE * (1 + Math.sin(now * 3.4) * 0.07);
+    var cy = y + bob;
+
+    ctx.save();
+
+    // 발밑 그림자 — 어느 칸 위인지 알려 준다
+    ctx.save();
+    ctx.translate(x, y + 40);
+    ctx.scale(1, SK.Iso.TH / SK.Iso.TW);
+    ctx.fillStyle = 'rgba(0,0,0,.26)';
+    ctx.beginPath(); ctx.arc(0, 0, 16 - bob * 0.4, 0, 6.2832); ctx.fill();
+    ctx.restore();
+
+    ctx.translate(x, cy);
+    ctx.scale(pulse, pulse);
+
+    // 빛무리
+    var g = ctx.createRadialGradient(0, 0, 2, 0, 0, 26);
+    g.addColorStop(0, 'rgba(255,143,176,.55)');
+    g.addColorStop(0.55, 'rgba(255,143,176,.18)');
+    g.addColorStop(1, 'rgba(255,143,176,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0, 0, 26, 0, 6.2832); ctx.fill();
+
+    // 하트 — 위쪽 두 봉우리를 원호로, 아래를 뾰족하게
+    var r = 7.2;
+    ctx.beginPath();
+    ctx.moveTo(0, 13);
+    ctx.bezierCurveTo(-14, 1, -r * 1.9, -12, 0, -4.5);
+    ctx.bezierCurveTo(r * 1.9, -12, 14, 1, 0, 13);
+    ctx.closePath();
+
+    var body = ctx.createLinearGradient(0, -12, 0, 13);
+    body.addColorStop(0, '#ff9fbe');
+    body.addColorStop(1, '#e04c7a');
+    ctx.fillStyle = body; ctx.fill();
+    ctx.strokeStyle = 'rgba(70,16,36,.5)'; ctx.lineWidth = 1.6; ctx.stroke();
+
+    // 왼쪽 위 하이라이트 — 입체로 보이게
+    ctx.beginPath();
+    ctx.ellipse(-4.2, -4.6, 2.6, 1.7, -0.5, 0, 6.2832);
+    ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fill();
+
+    ctx.restore();
+  }
+
   function render() {
     renderClock();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -2123,6 +2268,9 @@ SK.Game = (function () {
       if (e.kind === 't') {
         var s = world(e.o.i, e.o.j, 0);
         SK.Tiles.draw(ctx, e.o, now, s.x, s.y);
+        if (heartAt && e.o.i === heartAt.i && e.o.j === heartAt.j) {
+          drawHeart(ctx, s.x, s.y - SK.Tiles.surfaceOffset(e.o) - 40);
+        }
       } else {
         var ps = world(player.x, player.y, 0);
         SK.Player.draw(ctx, player, now, ps.x, ps.y, player.z * SK.Iso.TZ * 2);
@@ -2227,6 +2375,10 @@ SK.Game = (function () {
         return { mat: t.mat, damage: t.damage, broken: t.broken, label: t.label, solid: SK.Tiles.isSolid(t) };
       },
       solidCount: solidCount,
+      /** 지금 하트가 놓인 칸 (없으면 null) */
+      heart: function () { return heartAt ? { i: heartAt.i, j: heartAt.j } : null; },
+      /** 하트를 강제로 띄운다 — 확률을 기다리지 않고 연출·획득을 확인할 때 */
+      spawnHeart: function () { placeHeart(); return SK.Game.debug.heart(); },
       /** 지금 판에 깔린 재질 — 한 문제에 두 가지만 나와야 한다 */
       matMix: function () {
         var count = Object.create(null), out = [];

@@ -68,6 +68,13 @@ body{
   60%{transform:scale(.92)}
   100%{transform:scale(1)}
 }
+/* 하트를 먹었을 때 — 잃을 때와 반대로 부드럽게 부풀었다 돌아온다 */
+#hearts.gain{animation:heartGain .6s}
+@keyframes heartGain{
+  0%{transform:scale(1)}
+  35%{transform:scale(1.28);filter:drop-shadow(0 0 8px rgba(255,143,176,.9))}
+  100%{transform:scale(1)}
+}
 
 .icon-btn{
   pointer-events:auto;font-family:inherit;font-size:17px;line-height:1;color:var(--ink);
