@@ -2510,27 +2510,34 @@ SK.Game = (function () {
     ctx.scale(scale, scale);
     ctx.translate(-cam.x, -cam.y);
 
-    // 페인터 알고리즘 — 깊이(i+j) 순
+    /* 페인터 알고리즘 — 타일은 깊이(i+j) 순으로 뒤에서 앞으로 그린다. */
     var list = [];
     for (var k = 0; k < tiles.length; k++) {
-      list.push({ d: tiles[k].i + tiles[k].j, kind: 't', o: tiles[k] });
+      list.push({ d: tiles[k].i + tiles[k].j, o: tiles[k] });
     }
-    list.push({ d: player.x + player.y + 0.02, kind: 'p', o: player });
     list.sort(function (a, b) { return a.d - b.d; });
 
     for (var n = 0; n < list.length; n++) {
       var e = list[n];
-      if (e.kind === 't') {
-        var s = world(e.o.i, e.o.j, 0);
-        SK.Tiles.draw(ctx, e.o, now, s.x, s.y);
-        if (heartAt && e.o.i === heartAt.i && e.o.j === heartAt.j) {
-          drawHeart(ctx, s.x, s.y - SK.Tiles.surfaceOffset(e.o) - 40);
-        }
-      } else {
-        var ps = world(player.x, player.y, 0);
-        SK.Player.draw(ctx, player, now, ps.x, ps.y, player.z * SK.Iso.TZ * 2);
+      var s = world(e.o.i, e.o.j, 0);
+      SK.Tiles.draw(ctx, e.o, now, s.x, s.y);
+      if (heartAt && e.o.i === heartAt.i && e.o.j === heartAt.j) {
+        drawHeart(ctx, s.x, s.y - SK.Tiles.surfaceOffset(e.o) - 40);
       }
     }
+
+    /* 캐릭터는 **타일을 모두 그린 뒤** 맨 위에 올린다.
+     *
+     *  ⚠ 예전에는 캐릭터도 깊이 줄에 끼워 넣었다(x+y+0.02). 타일의 깊이는 i+j 로
+     *  정수인데 캐릭터는 걷는 동안 칸과 칸 사이의 실수 좌표를 쓴다. 그래서 한 칸
+     *  걸어가는 내내 캐릭터의 깊이가 **목적지 타일보다 작아**, 목적지 타일이
+     *  캐릭터 위에 덧그려졌다 — 걸을 때마다 아랫도리가 타일에 잘려 파묻힌 것처럼
+     *  보였다. 깊이를 어떻게 보정해도 '칸 사이'라는 어중간한 자리는 남는다.
+     *
+     *  캐릭터는 늘 타일 **위에** 서 있는 존재이고 타일보다 높은 것은 판에 없으므로,
+     *  줄 세우기를 그만두고 항상 마지막에 그린다. */
+    var ps = world(player.x, player.y, 0);
+    SK.Player.draw(ctx, player, now, ps.x, ps.y, player.z * SK.Iso.TZ * 2);
 
     if (holeAim.a > 0.01) drawHoleAim(ctx, holeAim);
 
