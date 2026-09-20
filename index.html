@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🎧</text></svg>">
-<link rel="stylesheet" href="css/style.css?v=0129f3aee9">
+<link rel="stylesheet" href="css/style.css?v=aee90fd7ff">
 </head>
 <body>
 
@@ -63,15 +63,20 @@
   <!-- 방향키: 3x3 격자의 가운데를 비우고 여덟 방향을 한 칸씩 둔다.
        한 번에 한 칸만 누르면 되므로 두 칸을 겹쳐 누를 일이 없다.
        위치가 곧 화면에서 갈 방향이다(js/game.js 의 data-dir 키 코드와 짝). -->
+  <!-- 방향키: 칸의 자리와 화살표 각도가 모두 **판의 기하 그대로**다.
+       타일이 2:1 마름모라 이웃 여덟 칸은 45°씩이 아니라 0·±26.6·±90·±153.4°
+       에 놓여 있다. 그래서 칸도 그 각도에 놓고, 화살표도 그 각도로 눕힌다.
+       화살표 글자는 전부 ↑ 하나를 쓰고 CSS 로 돌린다 — ↗ 같은 글자를 쓰면
+       45°로 고정돼 실제로 가는 26.6°와 또 어긋난다. -->
   <div id="touchDpad" aria-label="방향키">
-    <button class="dkey nw" type="button" data-dir="KeyQ" aria-label="왼쪽 위"><span>↖</span></button>
+    <button class="dkey nw" type="button" data-dir="KeyQ" aria-label="왼쪽 위"><span>↑</span></button>
     <button class="dkey n" type="button" data-dir="ArrowUp" aria-label="위"><span>↑</span></button>
-    <button class="dkey ne" type="button" data-dir="KeyE" aria-label="오른쪽 위"><span>↗</span></button>
-    <button class="dkey w" type="button" data-dir="ArrowLeft" aria-label="왼쪽"><span>←</span></button>
-    <button class="dkey e" type="button" data-dir="ArrowRight" aria-label="오른쪽"><span>→</span></button>
-    <button class="dkey sw" type="button" data-dir="KeyZ" aria-label="왼쪽 아래"><span>↙</span></button>
-    <button class="dkey s" type="button" data-dir="ArrowDown" aria-label="아래"><span>↓</span></button>
-    <button class="dkey se" type="button" data-dir="KeyC" aria-label="오른쪽 아래"><span>↘</span></button>
+    <button class="dkey ne" type="button" data-dir="KeyE" aria-label="오른쪽 위"><span>↑</span></button>
+    <button class="dkey w" type="button" data-dir="ArrowLeft" aria-label="왼쪽"><span>↑</span></button>
+    <button class="dkey e" type="button" data-dir="ArrowRight" aria-label="오른쪽"><span>↑</span></button>
+    <button class="dkey sw" type="button" data-dir="KeyZ" aria-label="왼쪽 아래"><span>↑</span></button>
+    <button class="dkey s" type="button" data-dir="ArrowDown" aria-label="아래"><span>↑</span></button>
+    <button class="dkey se" type="button" data-dir="KeyC" aria-label="오른쪽 아래"><span>↑</span></button>
   </div>
 
   <!-- 조이스틱: 손가락이 처음 닿은 자리가 원점인 플로팅 스틱 -->
@@ -177,22 +182,22 @@
     </div>
   </div>
 
-  <div id="loadNote">Created by gamtudyssam using AI · 0.00035</div>
+  <div id="loadNote">Created by gamtudyssam using AI · 0.00036</div>
 </div>
 
 <!-- 외부 JSON을 못 읽는 file:// 환경을 위한 내장 폴백 데이터 -->
-<script src="data/quizzes.fallback.js?v=0129f3aee9"></script>
+<script src="data/quizzes.fallback.js?v=aee90fd7ff"></script>
 
-<script src="js/audio.js?v=0129f3aee9"></script>
-<script src="js/iso.js?v=0129f3aee9"></script>
-<script src="js/particles.js?v=0129f3aee9"></script>
-<script src="js/tiles.js?v=0129f3aee9"></script>
-<script src="js/player.js?v=0129f3aee9"></script>
-<script src="js/quiz.js?v=0129f3aee9"></script>
-<script src="js/ranking-config.js?v=0129f3aee9"></script>
-<script src="js/ranking.js?v=0129f3aee9"></script>
-<script src="js/save.js?v=0129f3aee9"></script>
-<script src="js/game.js?v=0129f3aee9"></script>
-<script src="js/main.js?v=0129f3aee9"></script>
+<script src="js/audio.js?v=aee90fd7ff"></script>
+<script src="js/iso.js?v=aee90fd7ff"></script>
+<script src="js/particles.js?v=aee90fd7ff"></script>
+<script src="js/tiles.js?v=aee90fd7ff"></script>
+<script src="js/player.js?v=aee90fd7ff"></script>
+<script src="js/quiz.js?v=aee90fd7ff"></script>
+<script src="js/ranking-config.js?v=aee90fd7ff"></script>
+<script src="js/ranking.js?v=aee90fd7ff"></script>
+<script src="js/save.js?v=aee90fd7ff"></script>
+<script src="js/game.js?v=aee90fd7ff"></script>
+<script src="js/main.js?v=aee90fd7ff"></script>
 </body>
 </html>
