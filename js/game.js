@@ -187,7 +187,7 @@ SK.Game = (function () {
   var ui = {};
 
   var input = { dx: 0, dy: 0, jumpAt: -1e9, jumpHeld: false,
-                dirHeld: false, dirTapAt: -1e9,
+                dirHeld: false, dirTapAt: -1e9, fromStick: false,
                 keys: Object.create(null) };
 
   /* 걷기는 **방향을 실제로 잡고 있을 때만** 나간다.
@@ -205,6 +205,16 @@ SK.Game = (function () {
    *  입력을 버퍼에 담아 두는 것과 같은 이유로, 방향도 누른 시각을 짧게 기억해
    *  둔다. */
   var WALK_BUFFER_MS = 150;
+
+  /* 조이스틱으로 걸을 때 한 걸음을 얼마나 늘릴지.
+   *
+   *  방향키는 톡 누르면 한 칸이라 원하는 자리에서 멈추기 쉽다. 조이스틱은 미는
+   *  동작이라 '한 칸만'을 손으로 끊기 어렵고, 밀고 있는 내내 걸어서 목표 칸을
+   *  지나치기 쉽다. 재 보니 오히려 방향키보다 빨랐다 — 2.4초에 조이스틱 9칸,
+   *  방향키 8칸. 그래서 조이스틱 걸음만 늘려 잡는다. 걸음 시간을 늘리는 것이지
+   *  걸음 사이에 빈 시간을 두는 것이 아니다 — 쉬게 하면 뚝뚝 끊겨 보이고
+   *  발소리도 그만큼 끊긴다. 늘리면 걷는 동작과 발소리 간격이 함께 늘어난다. */
+  var STICK_WALK_SCALE = 1.35;
 
   /** 방향을 잡았는지 갱신한다. 새로 잡는 순간을 기억해 걸음 버퍼로 쓴다. */
   function setDirHeld(on) {
@@ -1060,6 +1070,7 @@ SK.Game = (function () {
     }
     setDirHeld(held);
     if (held) {
+      input.fromStick = false;       // 키보드·방향키가 잡았다
       /* 뗀 키는 그 즉시 빠진다 — ↑+→ 로 걷다 → 만 떼면 곧바로 ↑ 가 된다.
          예전에는 뗀 → 의 기억이 가로축에 남아 계속 ↗ 로 갔다. */
       input.dx = lastDir.x = clamp1(x);
@@ -1230,6 +1241,7 @@ SK.Game = (function () {
       if (!rawX && !rawY && Math.hypot(sx, sy) < 0.02) sx = sy = 0;
       input.dx = sx; input.dy = sy;
       setDirHeld(!!(sx || sy));
+      if (sx || sy) input.fromStick = true;
       if (sx || sy) showPadAim(radius);
       else if (padAimEl) padAimEl.style.opacity = '0';
     }
@@ -1536,7 +1548,8 @@ SK.Game = (function () {
     var wantWalk = input.dirHeld ||
                    (performance.now() - input.dirTapAt < WALK_BUFFER_MS);
     var wasHopping = player.hopping;
-    SK.Player.update(player, { dx: input.dx, dy: input.dy, jump: wantJump, walk: wantWalk },
+    SK.Player.update(player, { dx: input.dx, dy: input.dy, jump: wantJump, walk: wantWalk,
+                               walkScale: input.fromStick ? STICK_WALK_SCALE : 1 },
                      dt, worldApi, {
       onTakeoff: function (power) { SK.Audio.whoosh(power, panOf(player.x, player.y)); },
       onLand: function (intensity, power, i, j) { land(intensity, power, i, j); }

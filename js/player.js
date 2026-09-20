@@ -180,7 +180,7 @@ SK.Player = (function () {
       /* 걷기는 조준이 아니라 **지금 잡고 있는 방향**으로 나간다(input.walk).
          조준은 손을 뗀 뒤에도 잠깐 살아 있어서 — 떼고 점프하라고 남겨 둔 것이다 —
          걷기가 그것까지 보면 한 번 눌러도 걸음이 두 번 나간다. */
-      else if (p.aimDir && input.walk) tryWalk(p, world, ev);
+      else if (p.aimDir && input.walk) tryWalk(p, input, world, ev);
     }
 
     // 발밑 타일의 윗면 높이를 부드럽게 따라가 캐릭터가 파묻히지 않게 한다
@@ -199,7 +199,7 @@ SK.Player = (function () {
    *  삐끗할 때마다 떨어지면 산책이 아니라 외줄타기가 된다. 떨어지는 건 건너뛰기를
    *  잘못했을 때의 일로 남겨 둔다.
    */
-  function tryWalk(p, world, ev) {
+  function tryWalk(p, input, world, ev) {
     var dir = p.aimDir;
     var ni = p.ci + dir.di, nj = p.cj + dir.dj;
     if (!world.canWalk(ni, nj)) {
@@ -214,7 +214,10 @@ SK.Player = (function () {
     p.hopping = true;
     p.hopT = 0;
     p.power = 0.6;                    // 1 미만 = 걸음. 착지가 가볍고 타일이 닳지 않는다
-    p.hopDur = WALK_DUR;
+    /* 걸음 길이는 입력 방식마다 다를 수 있다(input.walkScale).
+       조이스틱은 밀고 있으면 계속 걸어서 원하는 칸을 지나치기 쉬우므로
+       한 걸음을 더 길게 잡는다 — 자세한 이유는 game.js 의 STICK_WALK_SCALE. */
+    p.hopDur = WALK_DUR * (input && input.walkScale > 0 ? input.walkScale : 1);
     p.hopH = WALK_H;
     p.squash = 0;                     // 걸음에는 늘어나는 동작이 없다
     p.stepLead = -(p.stepLead || 1);  // 발을 번갈아 내딛는다
