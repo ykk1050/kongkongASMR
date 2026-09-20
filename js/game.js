@@ -206,6 +206,29 @@ SK.Game = (function () {
    *  둔다. */
   var WALK_BUFFER_MS = 150;
 
+  /* 대각선은 두 방향키를 '함께' 눌러 만든다. 그런데 방향키를 누르면 그 자리에서
+   * 곧바로 한 칸 걸어가므로, 두 번째 키가 조금만 늦어도 첫 걸음은 이미 한 축
+   * 방향으로 나가 버린다. 재 보니 **20ms 차이부터** 대각선이 되지 않았다 —
+   * 사람이 두 키를 20ms 안에 맞추는 것은 불가능하다.
+   *
+   * 그래서 ↑↓←→ 처럼 **한 축만 덮는** 키를 새로 누르면, 걸음을 CHORD_MS 동안
+   * 미뤄 두고 짝이 오기를 기다린다. 기다림은 다음 둘 중 하나로 곧바로 끝난다.
+   *   · 짝이 왔다(방향키 둘이 눌렸다) → 즉시 대각선으로 출발
+   *   · 다 뗐다(톡 눌렀다) → 즉시 그 방향으로 출발
+   * 그래서 실제로 70ms 를 다 기다리는 것은 '한 키를 누른 채 가만히 있는' 경우
+   * 뿐이고, 그때는 어차피 계속 걷는 중이라 첫 걸음만 조금 늦다.
+   *
+   * Q·E·Z·C 같이 한 키로 대각선을 내는 키는 기다릴 이유가 없어 그대로 나간다.
+   * 방향키 패드와 조이스틱도 이 경로를 타지 않으므로 늦어지지 않는다.
+   *
+   * 값을 치른다 — 화살표 키를 꾹 누르면 첫 걸음이 76ms 쯤 늦다(걸음 350ms 의 22%).
+   * "대각선이 갈 수 있는 자리일 때만 기다리자"도 넣어 봤지만, 산책길은 타일이
+   * 붙어 있어 30번 재는 동안 30번 다 대각선이 있었다 — 값을 못 해 걷어냈다.
+   * 늦는 게 거슬리면 이 숫자만 줄이면 된다(줄인 만큼 늦게 누른 짝을 놓친다). */
+  var CHORD_MS = 70;
+  var chordUntil = -1e9;
+
+
   /* 조이스틱으로 걸을 때 한 걸음을 얼마나 늘릴지.
    *
    *  방향키는 톡 누르면 한 칸이라 원하는 자리에서 멈추기 쉽다. 조이스틱은 미는
@@ -964,6 +987,12 @@ SK.Game = (function () {
       }
       if (!KEYDIR[e.code]) return;
       e.preventDefault();
+      /* 한 축만 덮는 키는 대각선의 절반일 수 있다 — 짝을 잠깐 기다린다.
+         이미 다른 방향키가 눌려 있다면 기다릴 이유가 없다(짝은 이미 있다). */
+      if (!input.keys[e.code] && (!KEYDIR[e.code][0] || !KEYDIR[e.code][1]) &&
+          !anyHeld(KEYDIR)) {
+        chordUntil = performance.now() + CHORD_MS;
+      }
       input.keys[e.code] = true;
       if (keyLog) logKey('down', e.code);
       if (diagEl) pushDiag('down', e.code);
@@ -990,6 +1019,7 @@ SK.Game = (function () {
       lastDir.x = lastDir.y = 0;
       lastDirAt = -1e9;
       input.dirHeld = false; input.dirTapAt = -1e9;
+      chordUntil = -1e9;
       input.jumpHeld = false;
       syncKeyDir();
     });
@@ -1064,12 +1094,15 @@ SK.Game = (function () {
   /** 눌려 있는 방향 키만 더해 조준을 정한다. 다 뗐을 때만 마지막 조준이 잠깐 남는다. */
   function syncKeyDir() {
     if (padActive) return;                 // 조이스틱을 잡고 있으면 그쪽이 우선
-    var tnow = performance.now(), x = 0, y = 0, held = false;
+    var tnow = performance.now(), x = 0, y = 0, n = 0;
     for (var c in KEYDIR) {
       if (!input.keys[c]) continue;
       x += KEYDIR[c][0]; y += KEYDIR[c][1];
-      held = true;
+      n++;
     }
+    var held = n > 0;
+    // 짝이 왔거나(둘 이상) 다 뗐으면 더 기다릴 이유가 없다
+    if (n !== 1) chordUntil = -1e9;
     setDirHeld(held);
     if (held) {
       input.fromStick = false;       // 키보드·방향키가 잡았다
@@ -1236,6 +1269,7 @@ SK.Game = (function () {
        멈춘 순간 중간값에서 굳어 엉뚱한 방향이 잡힌다. */
     function tick(dt) {
       if (!padActive) return;
+      chordUntil = -1e9;                 // 스틱이 잡았으면 키보드 짝 기다리기는 끝
       var a = 1 - Math.pow(1 - SMOOTH, Math.max(0, dt) * 60);
       sx += (rawX - sx) * a;
       sy += (rawY - sy) * a;
@@ -1547,8 +1581,13 @@ SK.Game = (function () {
     var wantJump = (input.jumpHeld || jumpPending()) && !waitingForAim;
     /* 걷기는 지금 잡고 있는 방향, 또는 방금(WALK_BUFFER_MS 안에) 누른 방향으로만.
        남아 있는 조준만으로는 걷지 않는다 — 한 번 눌러 두 칸 가던 원인이다. */
-    var wantWalk = input.dirHeld ||
-                   (performance.now() - input.dirTapAt < WALK_BUFFER_MS);
+    /* 짝을 기다리는 동안에는 걷지 않는다 — 첫 걸음이 한 축으로 새 나가면
+       대각선을 만들 기회가 사라진다. 조준(input.dx/dy)은 이미 살아 있으므로
+       이 사이에 점프를 눌러도 그대로 먹힌다. */
+    var chording = performance.now() < chordUntil;
+    var wantWalk = !chording &&
+                   (input.dirHeld ||
+                    (performance.now() - input.dirTapAt < WALK_BUFFER_MS));
     var wasHopping = player.hopping;
     SK.Player.update(player, { dx: input.dx, dy: input.dy, jump: wantJump, walk: wantWalk,
                                walkScale: input.fromStick ? STICK_WALK_SCALE : 1 },
@@ -2633,7 +2672,9 @@ SK.Game = (function () {
           aimDir: d ? (d.di + ',' + d.dj) : null,
           aimHold: player ? Math.round((player.aimHold || 0) * 1000) : 0,
           hopping: player ? player.hopping : null,
-          cooldown: player ? +(player.cooldown || 0).toFixed(3) : null
+          cooldown: player ? +(player.cooldown || 0).toFixed(3) : null,
+          // 대각선 짝을 기다리는 중인가 (남은 ms). 0 이면 안 기다린다
+          chording: Math.max(0, Math.round(chordUntil - tnow))
         };
       },
       keyLog: function (on) { keyLog = on !== false; return keyLog ? '켬 — 키를 눌러 보세요' : '끔'; },
