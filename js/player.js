@@ -125,6 +125,7 @@ SK.Player = (function () {
       surface: 0,              // 발밑 타일의 윗면 높이(px) — 파묻힘 방지
       surfaceTarget: 0,
       justLanded: false,
+      upgraded: false,         // 이번 프레임에 걸음이 도약으로 이어받아졌나
       landIntensity: 0,
       blocked: 0               // 갈 수 없는 방향을 눌렀을 때의 반동
     };
@@ -139,6 +140,7 @@ SK.Player = (function () {
    */
   function update(p, input, dt, world, ev) {
     p.justLanded = false;
+    p.upgraded = false;
 
     if (p.stunTimer > 0) {
       p.stunTimer -= dt;
@@ -176,6 +178,8 @@ SK.Player = (function () {
     }
 
     if (p.hopping) {
+      // 걸음이 나가는 중에 점프를 누르면 그 걸음을 도약으로 이어받는다
+      if (input.jump) tryUpgradeWalk(p, world, ev);
       advanceHop(p, dt, world, ev);
     } else if (p.cooldown <= 0) {
       /* 점프가 걷기보다 먼저다. 방향을 잡은 채 점프를 누르는 것이 건너뛰기이므로,
@@ -225,6 +229,49 @@ SK.Player = (function () {
     p.hopH = WALK_H;
     p.squash = 0;                     // 걸음에는 늘어나는 동작이 없다
     p.stepLead = -(p.stepLead || 1);  // 발을 번갈아 내딛는다
+    if (ev && ev.onTakeoff) ev.onTakeoff(p.power);
+  }
+
+  /* 걸음 앞부분에서는 점프가 그 걸음을 **이어받는다.**
+   *
+   *  ⚠ 방향키를 누르면 그 자리에서 곧바로 한 칸 걸어간다. 그래서 키보드로
+   *  "저쪽으로 두 칸 뛰자" 를 하려면 방향키와 Space 를 **같은 프레임에** 눌러야
+   *  했다 — 사람 손으로는 안 되는 일이다. 재 보니 방향키를 60ms 먼저 누르면
+   *  걸음 1칸 + 도약 2칸 = 3칸이 나갔다. 원하는 건 2칸인데.
+   *  (Space 를 먼저 누르면 2칸이 나오지만, 그건 모든 게임과 반대 순서다.)
+   *
+   *  걸음과 도약은 같은 방향으로 가므로, 걸음이 아직 공중에 있을 때 목적지를
+   *  한 칸에서 두 칸으로 **늘리면** 된다. 진행도를 절반으로 다시 잡아 주면
+   *  화면상 위치가 튀지 않고, 내딛던 걸음이 그대로 도약으로 이어진다.
+   *  걸음은 타일을 닳게 하지 않지만 이어받은 뒤에는 도약이므로, 착지에서
+   *  제 몫대로 타일이 닳는다. */
+  var UPGRADE_T = 0.62;      // 걸음의 앞 62% 안에서만 이어받는다
+
+  function tryUpgradeWalk(p, world, ev) {
+    if (p.power >= 1) return;              // 이미 도약 중이다
+    if (p.hopT > UPGRADE_T) return;        // 너무 늦었다 — 그냥 착지시킨다
+    var dir = p.aimDir;
+    if (!dir) return;
+    // 지금 내딛는 걸음과 같은 방향일 때만 — 다른 방향이면 착지 후 새로 뛴다
+    if (p.ci - p.fromI !== dir.di || p.cj - p.fromJ !== dir.dj) return;
+
+    /* 두 칸 너머에 **성한 발판이 있을 때만** 이어받는다.
+       canEnter 로 보면 구멍도 통과되어, 걸어가려던 사람을 구멍으로 날려 보낸다.
+       (일부러 구멍으로 뛰어드는 것은 서 있는 상태에서 여전히 된다 — 이어받기는
+       어디까지나 '걸음을 도약으로 바꿔 주는 보조'라 안전한 쪽으로만 건다.) */
+    var ni = p.fromI + dir.di * JUMP_SPAN, nj = p.fromJ + dir.dj * JUMP_SPAN;
+    if (!world.canWalk(ni, nj)) return;    // 디딜 곳이 없다 — 걸음 그대로 둔다
+
+    /* 위치가 튀지 않게 진행도를 다시 잡는다.
+       화면 위치는 from + hopT * (거리) 이므로, 거리가 1에서 2로 늘면
+       hopT 를 절반으로 줄여야 지금 서 있는 자리가 그대로다. */
+    p.hopT = p.hopT / JUMP_SPAN;
+    p.ci = ni; p.cj = nj;
+    p.power = 1;
+    p.hopDur = HOP_DUR;
+    p.hopH = HOP_H;
+    p.squash = -0.3;
+    p.upgraded = true;                     // 점프 요청을 썼다고 game.js 에 알린다
     if (ev && ev.onTakeoff) ev.onTakeoff(p.power);
   }
 

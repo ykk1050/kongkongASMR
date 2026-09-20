@@ -1577,7 +1577,10 @@ SK.Game = (function () {
      *  그래서 예측(couldAct) 대신 **결과**도 함께 본다 — 이 프레임에 도약이
      *  시작됐으면 그 요청은 쓴 것이다. 요청이 살아 있는 동안 wantJump 는 참이므로,
      *  이때의 도약은 걸음이 아니라 반드시 점프다. */
-    var tookOff = !wasHopping && player.hopping;
+    /* 걷던 걸음을 도약이 이어받은 것도 '뛴 것'이다(player.upgraded). 이때는
+       이미 hopping 이라 tookOff 가 false 이므로 따로 세어 줘야 한다 — 안 세면
+       요청이 남아 착지하자마자 한 번 더 뛴다. */
+    var tookOff = (!wasHopping && player.hopping) || player.upgraded;
     if ((couldAct || tookOff) && !waitingForAim) consumeJump();
 
     // 점프 궤적 (소리 ↔ 시각 연결)
@@ -2556,7 +2559,10 @@ SK.Game = (function () {
           expected: fsm && fsm.expected(),
           progress: fsm ? fsm.progress.slice() : [],
           grid: GRID, spacing: SPACING, scale: scale,
-          player: { ci: player.ci, cj: player.cj, z: player.z, surface: player.surface },
+          // x·y 는 렌더용 연속 좌표 — 이동이 매끄러운지(위치가 튀지 않는지) 볼 때 쓴다
+          player: { ci: player.ci, cj: player.cj, x: player.x, y: player.y,
+                    z: player.z, surface: player.surface,
+                    hopping: player.hopping, power: player.power },
           tiles: quizTiles.map(function (t) {
             return {
               i: t.i, j: t.j, label: t.label, correct: t.correct, order: t.order,
