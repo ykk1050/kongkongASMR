@@ -187,7 +187,30 @@ SK.Game = (function () {
   var ui = {};
 
   var input = { dx: 0, dy: 0, jumpAt: -1e9, jumpHeld: false,
+                dirHeld: false, dirTapAt: -1e9,
                 keys: Object.create(null) };
+
+  /* 걷기는 **방향을 실제로 잡고 있을 때만** 나간다.
+   *
+   *  ⚠ 한 번 눌렀는데 두 칸을 갔다. 조준(input.dx/dy)은 손을 뗀 뒤에도
+   *  TAP_HOLD_MS(0.42초) 동안 남는데 — 방향을 떼고 점프하는 흐름을 위해 일부러
+   *  남긴다 — 걷기가 그 남은 조준까지 보고 있었다. 걸음 한 번이 0.29초라, 첫
+   *  걸음이 끝나는 순간 아직 살아 있는 조준으로 두 번째 걸음이 그냥 나갔다.
+   *
+   *  그래서 조준과 걷기를 갈랐다. 남은 조준은 **점프 방향**만 맡고, 걷기는
+   *  지금 눌려 있는 방향만 본다.
+   *
+   *  다만 '지금 눌려 있는가'만 보면 걸음 중에 톡 누른 입력이 통째로 사라진다
+   *  (걸음 0.29초 동안 누르고 뗀 것은 걸음이 끝날 때 이미 떼어져 있다). 점프
+   *  입력을 버퍼에 담아 두는 것과 같은 이유로, 방향도 누른 시각을 짧게 기억해
+   *  둔다. */
+  var WALK_BUFFER_MS = 150;
+
+  /** 방향을 잡았는지 갱신한다. 새로 잡는 순간을 기억해 걸음 버퍼로 쓴다. */
+  function setDirHeld(on) {
+    if (on && !input.dirHeld) input.dirTapAt = performance.now();
+    input.dirHeld = on;
+  }
 
   /* 점프 입력 버퍼.
    *
@@ -954,6 +977,7 @@ SK.Game = (function () {
       input.keys = Object.create(null);
       lastDir.x = lastDir.y = 0;
       lastDirAt = -1e9;
+      input.dirHeld = false; input.dirTapAt = -1e9;
       input.jumpHeld = false;
       syncKeyDir();
     });
@@ -1034,6 +1058,7 @@ SK.Game = (function () {
       x += KEYDIR[c][0]; y += KEYDIR[c][1];
       held = true;
     }
+    setDirHeld(held);
     if (held) {
       /* 뗀 키는 그 즉시 빠진다 — ↑+→ 로 걷다 → 만 떼면 곧바로 ↑ 가 된다.
          예전에는 뗀 → 의 기억이 가로축에 남아 계속 ↗ 로 갔다. */
@@ -1178,6 +1203,7 @@ SK.Game = (function () {
       if (mag < DEAD) {
         sx = sy = 0;
         input.dx = 0; input.dy = 0;
+        setDirHeld(false);
         if (padAimEl) padAimEl.style.opacity = '0';
         return;
       }
@@ -1187,6 +1213,7 @@ SK.Game = (function () {
       sx += (tx - sx) * SMOOTH;
       sy += (ty - sy) * SMOOTH;
       input.dx = sx; input.dy = sy;
+      setDirHeld(!!(sx || sy));
       showPadAim(radius);
     }
 
@@ -1218,6 +1245,7 @@ SK.Game = (function () {
       cx = mx + ox * pull; cy = my + oy * pull;
       sx = sy = 0;
       input.dx = 0; input.dy = 0;
+      setDirHeld(false);
       nub.style.transform = 'translate(' + (cx - mx) + 'px,' + (cy - my) + 'px)';
       pad.classList.add('active');
     });
@@ -1231,6 +1259,7 @@ SK.Game = (function () {
       padId = null; padActive = false;
       sx = sy = 0;
       input.dx = 0; input.dy = 0;
+      setDirHeld(false);
       nub.style.transform = '';
       if (padAimEl) padAimEl.style.opacity = '0';
       pad.classList.remove('active');
@@ -1482,14 +1511,21 @@ SK.Game = (function () {
     var waitingForAim = !hasAim && (performance.now() - input.jumpAt < STOMP_GRACE_MS);
 
     var wantJump = (input.jumpHeld || jumpPending()) && !waitingForAim;
+    /* 걷기는 지금 잡고 있는 방향, 또는 방금(WALK_BUFFER_MS 안에) 누른 방향으로만.
+       남아 있는 조준만으로는 걷지 않는다 — 한 번 눌러 두 칸 가던 원인이다. */
+    var wantWalk = input.dirHeld ||
+                   (performance.now() - input.dirTapAt < WALK_BUFFER_MS);
     var wasHopping = player.hopping;
-    SK.Player.update(player, { dx: input.dx, dy: input.dy, jump: wantJump }, dt, worldApi, {
+    SK.Player.update(player, { dx: input.dx, dy: input.dy, jump: wantJump, walk: wantWalk },
+                     dt, worldApi, {
       onTakeoff: function (power) { SK.Audio.whoosh(power, panOf(player.x, player.y)); },
       onLand: function (intensity, power, i, j) { land(intensity, power, i, j); }
     });
     if (!wasHopping && player.hopping) {
       // 방향 조준 버퍼를 비운다 — 안 그러면 직전 방향이 다음 조준에 섞여 든다
       clearKeyCombine();
+      // 이 걸음으로 눌림 하나를 썼다. 남겨 두면 그것으로 또 한 칸 간다.
+      input.dirTapAt = -1e9;
     }
     // 뛸 기회가 있었던 프레임에서만 점프 요청을 소비한다.
     // 못 뛰는 구간이거나 방향을 기다리는 중이면 그대로 남겨 둔다.

@@ -177,7 +177,10 @@ SK.Player = (function () {
       /* 점프가 걷기보다 먼저다. 방향을 잡은 채 점프를 누르는 것이 건너뛰기이므로,
          걷기를 먼저 보면 점프 입력이 걸음에 먹혀 영영 건너뛸 수 없다. */
       if (input.jump) tryStartHop(p, input, world, ev);
-      else if (p.aimDir) tryWalk(p, world, ev);
+      /* 걷기는 조준이 아니라 **지금 잡고 있는 방향**으로 나간다(input.walk).
+         조준은 손을 뗀 뒤에도 잠깐 살아 있어서 — 떼고 점프하라고 남겨 둔 것이다 —
+         걷기가 그것까지 보면 한 번 눌러도 걸음이 두 번 나간다. */
+      else if (p.aimDir && input.walk) tryWalk(p, world, ev);
     }
 
     // 발밑 타일의 윗면 높이를 부드럽게 따라가 캐릭터가 파묻히지 않게 한다
