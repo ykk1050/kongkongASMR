@@ -23,12 +23,14 @@ SK.Player = (function () {
   var HOP_POWER_H = 1.25;
   var COOLDOWN = 0.05;       // 착지 후 다음 도약까지
 
-  /* 걷기 — 낮게, 짧게, 곧바로 다음 걸음.
-     이 셋을 합치면 초당 대여섯 걸음이 되어 발소리가 하나로 이어져 들린다.
-     더 빠르게 하면 소리가 겹쳐 뭉개지고, 더 느리면 다시 뚝뚝 끊긴다. */
-  var WALK_DUR = 0.17;
-  var WALK_H = 0.11;
-  var WALK_COOLDOWN = 0.015;
+  /* 걷기 — 산책하는 걸음걸이.
+     초당 서너 걸음이면 발소리가 이어지면서도 한 걸음 한 걸음이 또렷하다.
+     더 빠르면 소리가 겹쳐 뭉개지고 뛰는 것처럼 보인다. */
+  var WALK_DUR = 0.26;
+  var WALK_COOLDOWN = 0.03;
+  /* 공중에 뜨지 않는다. 걷는데 포물선을 그리면 그건 깡충거리는 것이지 걷는 게
+     아니다. 몸이 살짝 오르내리는 것은 draw() 의 걸음 주기가 맡는다. */
+  var WALK_H = 0;
 
   /* 건너뛰기는 **두 칸**이다. 한 칸이면 붙어 있는 타일로 뛰게 되는데 그건 걷기가
      이미 하는 일이고, 정작 벌어진 디딤돌 구간은 건널 수가 없다. */
@@ -211,7 +213,8 @@ SK.Player = (function () {
     p.power = 0.6;                    // 1 미만 = 걸음. 착지가 가볍고 타일이 닳지 않는다
     p.hopDur = WALK_DUR;
     p.hopH = WALK_H;
-    p.squash = -0.12;
+    p.squash = 0;                     // 걸음에는 늘어나는 동작이 없다
+    p.stepLead = -(p.stepLead || 1);  // 발을 번갈아 내딛는다
     if (ev && ev.onTakeoff) ev.onTakeoff(p.power);
   }
 
@@ -263,7 +266,8 @@ SK.Player = (function () {
          뒤로 갈수록 쿵쿵거리는 소리가 된다. 걸음은 처음부터 끝까지 같은 세기다. */
       var base = walking ? 0.3 : (p.power > 1 ? 0.95 : 0.45);
       p.landIntensity = walking ? base : Math.min(1, base + p.chain * 0.07);
-      p.squash = walking ? 0.18 : 0.5 * (p.power > 1 ? 1.5 : 1);
+      p.squash = walking ? 0.1 : 0.5 * (p.power > 1 ? 1.5 : 1);
+      if (walking) p.walkBob = 0;
       p.justLanded = true;
       if (ev && ev.onLand) ev.onLand(p.landIntensity, p.power, p.ci, p.cj);
       return;
@@ -273,8 +277,15 @@ SK.Player = (function () {
     p.x = p.fromI + (p.ci - p.fromI) * t;
     p.y = p.fromJ + (p.cj - p.fromJ) * t;
     p.z = Math.sin(Math.PI * t) * p.hopH;
-    // 도약 중에는 살짝 늘어난다
-    p.squash = -0.22 * Math.sin(Math.PI * t) * (p.power > 1 ? 1.3 : p.power < 1 ? 0.45 : 1);
+    if (p.power < 1) {
+      /* 걸음 — 몸이 한 번 올라갔다 내려온다. 발이 땅을 미는 순간 가장 높다.
+         z(격자 높이)가 아니라 몸통만 올리는 것이라 그림자는 발밑에 붙어 있다. */
+      p.walkBob = Math.sin(Math.PI * t);
+      p.squash = 0;
+    } else {
+      // 도약 중에는 살짝 늘어난다
+      p.squash = -0.22 * Math.sin(Math.PI * t) * (p.power > 1 ? 1.3 : 1);
+    }
   }
 
   function stun(p, sec) { p.stunTimer = sec; p.chain = 0; p.aimHold = 0; p.aimDir = null; }
@@ -303,9 +314,17 @@ SK.Player = (function () {
     var w = 27 * (1 + sq * 0.5);
     var h = 30 * (1 - sq * 0.55);
 
+    /* 걸음 주기 — 걷는 동안에만 산다.
+       몸이 한 번 올라갔다 내려오고(bob), 두 발이 번갈아 앞뒤로 움직인다.
+       이게 없으면 같은 그림이 칸에서 칸으로 미끄러져 '걷는다'로 안 보인다. */
+    var walking = p.hopping && p.power < 1;
+    var bob = walking ? (p.walkBob || 0) : 0;
+    var lead = p.stepLead || 1;
+    var stride = walking ? Math.sin(Math.PI * p.hopT) * 6 : 0;
+
     // 캐릭터의 발이 정확히 타일 윗면에 놓이도록 surface 만큼 올린다
     var cx = sx + (p.blocked > 0 ? Math.sin(now * 40) * 3 * p.blocked : 0);
-    var cy = sy - p.surface - zpx - h;
+    var cy = sy - p.surface - zpx - h - bob * 3;
 
     // --- 소리 오라: 출력 레벨에 맞춰 맥동하는 링 (소리 ↔ 시각 연결) ---
     var level = SK.Audio.getLevel ? SK.Audio.getLevel() : 0;
@@ -325,10 +344,16 @@ SK.Player = (function () {
     ctx.translate(cx, cy);
     if (p.stunTimer > 0) ctx.translate(Math.sin(now * 42) * 3, 0);
 
-    // 발
+    // 발 — 걷는 동안에는 번갈아 앞뒤로 내딛는다
     ctx.fillStyle = '#e6913f';
-    ctx.beginPath(); ctx.ellipse(-w * 0.38, h * 0.92, 8, 4.5, 0, 0, 6.2832); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(w * 0.38, h * 0.92, 8, 4.5, 0, 0, 6.2832); ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(-w * 0.38 + stride * lead, h * 0.92 - Math.max(0, stride * lead) * 0.35,
+                8, 4.5, 0, 0, 6.2832);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(w * 0.38 - stride * lead, h * 0.92 - Math.max(0, -stride * lead) * 0.35,
+                8, 4.5, 0, 0, 6.2832);
+    ctx.fill();
 
     // 몸통
     var g = ctx.createLinearGradient(0, -h, 0, h);

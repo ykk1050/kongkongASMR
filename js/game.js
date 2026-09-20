@@ -1410,8 +1410,15 @@ SK.Game = (function () {
     var halfW = (viewRect.w / 2) / scale;
     var halfH = (viewRect.h / 2) / scale;
 
-    var xLo = boardWorld.maxX - halfW, xHi = boardWorld.minX + halfW;
-    var yLo = boardWorld.maxY - halfH, yHi = boardWorld.minY + halfH;
+    /* 카메라가 갈 수 있는 범위 — 화면 가장자리가 판 밖으로 나가지 않는 구간이다.
+       왼쪽 끝은 minX + 반쪽, 오른쪽 끝은 maxX - 반쪽. 판이 화면보다 좁으면 그
+       구간이 뒤집히고(lo > hi), 그때만 가운데 고정이다.
+
+       ⚠ 예전에는 이 둘이 **서로 바뀌어** 있었다. 판이 늘 화면보다 작던 시절에는
+       항상 '가운데 고정' 가지로 빠져서 티가 나지 않았는데, 판을 화면보다 넓게
+       만들자 넓어질수록 더 확실히 가운데에 묶여 카메라가 아예 따라오지 않았다. */
+    var xLo = boardWorld.minX + halfW, xHi = boardWorld.maxX - halfW;
+    var yLo = boardWorld.minY + halfH, yHi = boardWorld.maxY - halfH;
 
     cam.x = (xLo > xHi) ? (boardWorld.minX + boardWorld.maxX) / 2
       : Math.max(xLo, Math.min(xHi, cam.x));
