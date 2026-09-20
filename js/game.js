@@ -8,8 +8,17 @@ window.SK = window.SK || {};
 
 SK.Game = (function () {
 
-  /* 타일 사이 간격(격자 단위). 1이면 딱 붙고, 2면 한 칸이 완전히 빈다. */
-  var SPACING = 1.85;
+  /* 타일 사이 간격(격자 단위). **1 이면 이웃 타일끼리 딱 붙는다.**
+   *
+   *  예전에는 1.85 — 모든 타일이 떨어져 있어 한 칸 움직일 때마다 점프해야 했고,
+   *  그래서 발소리가 뚝뚝 끊겼다. 이제 붙여 놓고, 끊고 싶은 자리는 **칸을 비워**
+   *  만든다. 붙은 칸들은 걸어서 잇고(연속된 발소리), 비운 칸은 두 칸 건너뛰기로
+   *  넘는다(디딤돌 구간). 간격이 타일마다 다른 게 아니라 **지형이 다른 것**이다. */
+  var SPACING = 1.0;
+
+  /* 건너뛰기 폭 — js/player.js 의 JUMP_SPAN 과 같아야 한다.
+     연결성·길 판정이 "걸어서 한 칸, 뛰어서 두 칸"을 모두 셈에 넣어야 하기 때문이다. */
+  var JUMP_SPAN = 2;
 
   var GRID = 5;
   var START = { i: 2, j: 2 };
@@ -241,11 +250,20 @@ SK.Game = (function () {
     bindSaveHooks();
   }
 
-  /** 화면 크기에 맞춰 격자 크기를 고른다 (타일이 잘리지 않도록) */
-  function pickGrid() {
+  /* 화면에 보이는 배율. 예전에는 "판 전체가 들어오도록" 매번 계산했는데, 이제
+     판이 화면보다 넓으므로 그 계산이 의미가 없다. 대신 타일이 손가락만 하게
+     보이는 고정 배율을 쓰고 카메라가 캐릭터를 따라간다. */
+  function pickZoom() {
     var w = window.innerWidth, h = window.innerHeight;
-    var small = Math.min(w, h);
-    GRID = (small < 480 || w < 620) ? 4 : (w < 1100 ? 5 : 6);
+    if (w < 620 || h < 560) return 0.84;
+    if (w < 1100) return 0.95;
+    return 1.05;
+  }
+
+  /** 격자 크기 — 길이 화면 두세 개 분량으로 뻗을 만큼 넉넉히 */
+  function pickGrid() {
+    var w = window.innerWidth;
+    GRID = w < 620 ? 15 : (w < 1100 ? 17 : 19);
     START = { i: (GRID - 1) >> 1, j: (GRID - 1) >> 1 };
   }
 
@@ -275,14 +293,104 @@ SK.Game = (function () {
   function buildWorld(keep) {
     boardSeed = (Math.random() * 0x7fffffff) | 0;
     tiles = []; tileAt = {};
-    for (var i = 0; i < GRID; i++) {
-      for (var j = 0; j < GRID; j++) {
-        var t = SK.Tiles.make(i, j, floorMat);
-        tiles.push(t);
-        tileAt[i + ',' + j] = t;
-      }
+    var cells = carveWalkway(keep);
+    for (var n = 0; n < cells.length; n++) {
+      var c = cells[n];
+      var t0 = SK.Tiles.make(c.i, c.j, floorMat);
+      tiles.push(t0);
+      tileAt[c.i + ',' + c.j] = t0;
     }
     carveHoles(keep);
+  }
+
+  /* =========================================================
+   *  산책길 만들기
+   *
+   *  판 전체를 타일로 채우면 화면보다 넓은 격자가 통째로 발판이 되어, 어디로
+   *  가야 할지가 사라진다. 그래서 **길을 깐다** — 시작 칸에서 격자 축을 따라
+   *  무작위로 걸어간 자취를 길로 삼고, 그 둘레를 살찌워 리본처럼 만든다.
+   *
+   *  축 방향으로만 걷는 이유: 아이소메트릭에서 격자 축으로 이웃한 두 칸은 변을
+   *  통째로 맞대지만, 대각선 이웃은 꼭짓점 하나로만 닿는다. 축으로 이어야
+   *  **끊긴 데 없는 길**로 보인다.
+   *
+   *  리본을 굵게 뽑는 것도 이유가 있다. 폭이 1이면 글자 타일 하나가 길을 두
+   *  동강 내서, "글자 없는 디딤 타일로 이어진 길" 규칙을 만족하는 배치를 찾기가
+   *  거의 불가능해진다.
+   * ======================================================= */
+
+  /** 격자 축 네 방향 — 변을 맞대고 이어지는 이웃 */
+  var AXIS = [{ di: 1, dj: 0 }, { di: -1, dj: 0 }, { di: 0, dj: 1 }, { di: 0, dj: -1 }];
+
+  function carveWalkway(keep) {
+    var want = Math.round(GRID * 5.5);       // 목표 칸 수 — 화면 두세 개 분량의 길
+    var set = Object.create(null), out = [];
+
+    function add(i, j) {
+      if (i < 0 || j < 0 || i >= GRID || j >= GRID) return false;
+      var key = i + ',' + j;
+      if (set[key]) return false;
+      set[key] = true; out.push({ i: i, j: j });
+      return true;
+    }
+
+    /* 길은 **캐릭터가 선 자리에서** 뻗어 나간다.
+       예전에는 START 에서 걷기 시작하면서 keep 을 따로 얹었는데, 문제를 풀고
+       START 에서 멀어진 채 다음 판이 깔리면 keep 이 길과 떨어진 **섬**이 됐다.
+       그 판은 어디로도 갈 수 없어 답을 밟을 수가 없다. */
+    var ci = keep ? keep.i : START.i, cj = keep ? keep.j : START.j;
+    if (ci < 1 || cj < 1 || ci >= GRID - 1 || cj >= GRID - 1) { ci = START.i; cj = START.j; }
+    add(ci, cj);
+    var dir = AXIS[Math.floor(Math.random() * 4)];
+    var guard = 0;
+    while (out.length < want && guard++ < want * 40) {
+      // 같은 방향으로 서너 칸씩 이어 걷다가 방향을 바꾼다 — 길이 곧게 뻗어 보인다
+      if (Math.random() < 0.32) dir = AXIS[Math.floor(Math.random() * 4)];
+      var ni = ci + dir.di, nj = cj + dir.dj;
+      if (ni < 1 || nj < 1 || ni >= GRID - 1 || nj >= GRID - 1) {
+        dir = AXIS[Math.floor(Math.random() * 4)];
+        continue;
+      }
+      ci = ni; cj = nj;
+      add(ci, cj);
+      /* 둘레를 살찌워 리본으로 — 폭이 1이면 글자 하나에 길이 끊긴다.
+         다만 너무 두껍게 하면 길이 아니라 벌판이 되어 "어디로 가는 길"이
+         사라진다. 대체로 폭 2, 가끔 광장 정도가 걷기 좋았다. */
+      if (Math.random() < 0.55) {
+        var a = AXIS[Math.floor(Math.random() * 4)];
+        add(ci + a.di, cj + a.dj);
+      }
+      if (Math.random() < 0.14) {
+        var b = AXIS[Math.floor(Math.random() * 4)];
+        add(ci + b.di * 2, cj + b.dj * 2);   // 가끔 넓은 광장
+      }
+    }
+
+    /* 마지막 안전장치 — 시작 칸에서 못 닿는 칸은 버린다.
+       광장을 두 칸 건너 얹다가 섬이 생길 수 있다. 섬이 하나라도 남으면
+       "답을 못 밟는 판"이 되므로, 만들 때 아예 없앤다. */
+    return keepReachable(out, out[0]);
+  }
+
+  /** 시작 칸에서 걷기·건너뛰기로 닿는 칸만 남긴다 */
+  function keepReachable(cells, from) {
+    var own = Object.create(null);
+    for (var k = 0; k < cells.length; k++) own[cells[k].i + ',' + cells[k].j] = true;
+
+    var seen = Object.create(null), queue = [from];
+    seen[from.i + ',' + from.j] = true;
+    while (queue.length) {
+      var cur = queue.pop();
+      eachReach(cur.i, cur.j, function (ni, nj) {
+        var key = ni + ',' + nj;
+        if (own[key] && !seen[key]) { seen[key] = true; queue.push({ i: ni, j: nj }); }
+      });
+    }
+    var out = [];
+    for (var n = 0; n < cells.length; n++) {
+      if (seen[cells[n].i + ',' + cells[n].j]) out.push(cells[n]);
+    }
+    return out;
   }
 
   /* 문제가 바뀔 때마다 판을 새로 깐다.
@@ -319,6 +427,20 @@ SK.Game = (function () {
         size: 150, life: 0.5, width: 2, color: 'rgba(255,255,255,'
       });
     }
+
+    /* 판이 바뀌면 경계도 바뀐다. 이걸 빠뜨리면 clampCam 이 **지난 판의 경계**로
+       카메라를 묶어서, 캐릭터가 화면 밖에 있는데도 카메라가 따라가지 못한다.
+       판이 화면보다 작던 시절에는 카메라가 거의 고정이라 티가 나지 않았다. */
+    boardWorld = computeBoardWorld();
+    snapCamToPlayer();
+  }
+
+  /** 카메라를 캐릭터 위로 곧바로 옮긴다 — 판이 통째로 바뀌었을 때는 따라갈 게 아니라 옮겨야 한다 */
+  function snapCamToPlayer() {
+    if (!player) return;
+    var ps = world(player.x, player.y, 0);
+    cam.x = ps.x; cam.y = ps.y;
+    clampCam();
   }
 
   /** 남은 타일이 전부 이어져 있는가 (8방향 이웃 기준) */
@@ -328,14 +450,12 @@ SK.Game = (function () {
     if (!total) return false;
     var seen = Object.create(null), queue = [startKey];
     seen[startKey] = true;
-    var DIRS = SK.Player.DIRS;
     while (queue.length) {
       var parts = queue.pop().split(',');
-      var ci = +parts[0], cj = +parts[1];
-      for (var d = 0; d < DIRS.length; d++) {
-        var key = (ci + DIRS[d].di) + ',' + (cj + DIRS[d].dj);
+      eachReach(+parts[0], +parts[1], function (ni, nj) {
+        var key = ni + ',' + nj;
         if (tileAt[key] && !seen[key]) { seen[key] = true; queue.push(key); }
-      }
+      });
     }
     var reached = 0;
     for (var s2 in seen) reached++;
@@ -348,12 +468,13 @@ SK.Game = (function () {
       for (var j = 0; j < GRID; j++) {
         if (i === START.i && j === START.j) continue;     // 시작 칸은 남긴다
         if (keep && i === keep.i && j === keep.j) continue;   // 서 있는 칸도 남긴다
+        if (!tileAt[i + ',' + j]) continue;               // 애초에 길이 아닌 칸
         cand.push({ i: i, j: j });
       }
     }
     cand = SK.Quiz.shuffle(cand);
 
-    var want = Math.round(GRID * GRID * HOLE_RATIO);
+    var want = Math.round(tiles.length * HOLE_RATIO);
     for (var n = 0; n < cand.length && want > 0; n++) {
       var c = cand[n], key = c.i + ',' + c.j;
       var t = tileAt[key];
@@ -365,6 +486,21 @@ SK.Game = (function () {
       } else {
         tileAt[key] = t;                                  // 섬이 생기면 되돌린다
       }
+    }
+  }
+
+  /* =========================================================
+   *  이웃 — 걸어서 한 칸, 뛰어서 두 칸
+   *
+   *  연결성과 길 판정은 "갈 수 있는가"를 묻는 것이므로, 걷기(한 칸)와
+   *  건너뛰기(두 칸)를 **둘 다** 셈에 넣어야 한다. 한 칸만 보면 디딤돌 구간이
+   *  섬으로 잡혀 판이 통째로 퇴짜를 맞고, 두 칸만 보면 붙어 있는 길이 안 보인다.
+   * ======================================================= */
+  function eachReach(i, j, fn) {
+    var DIRS = SK.Player.DIRS;
+    for (var d = 0; d < DIRS.length; d++) {
+      if (fn(i + DIRS[d].di, j + DIRS[d].dj) === false) return;
+      if (fn(i + DIRS[d].di * JUMP_SPAN, j + DIRS[d].dj * JUMP_SPAN) === false) return;
     }
   }
 
@@ -583,13 +719,13 @@ SK.Game = (function () {
       seen[key0] = true; comp[key0] = true;
       while (queue.length) {
         var cur = queue.pop(); n++;
-        for (var d = 0; d < DIRS.length; d++) {
-          var ni = cur.i + DIRS[d].di, nj = cur.j + DIRS[d].dj, key = ni + ',' + nj;
-          if (seen[key]) continue;
+        eachReach(cur.i, cur.j, function (ni, nj) {
+          var key = ni + ',' + nj;
+          if (seen[key]) return;
           var t = getTile(ni, nj);
-          if (!t || t === except || t.label || !SK.Tiles.isSolid(t)) continue;
+          if (!t || t === except || t.label || !SK.Tiles.isSolid(t)) return;
           seen[key] = true; comp[key] = true; queue.push(t);
-        }
+        });
       }
       if (!best || n > best.size) best = { cells: comp, size: n };
     }
@@ -599,11 +735,11 @@ SK.Game = (function () {
   /** 이 칸이 길 위에 있거나 길과 맞닿아 있는가 (8방향) */
   function touchesRoad(i, j, road) {
     if (road.cells[i + ',' + j]) return true;
-    var DIRS = SK.Player.DIRS;
-    for (var d = 0; d < DIRS.length; d++) {
-      if (road.cells[(i + DIRS[d].di) + ',' + (j + DIRS[d].dj)]) return true;
-    }
-    return false;
+    var hit = false;
+    eachReach(i, j, function (ni, nj) {
+      if (road.cells[ni + ',' + nj]) { hit = true; return false; }
+    });
+    return hit;
   }
 
   /** 캐릭터와 모든 글자가 같은 길에 붙어 있는가 */
@@ -1233,10 +1369,11 @@ SK.Game = (function () {
     viewRect = safeRect();
     boardWorld = computeBoardWorld();
 
+    /* 판이 화면보다 넓으므로 "다 보이게 줄이기"는 하지 않는다. 다만 판이 안전
+       영역보다 작아지는 경우(아주 큰 화면)에는 넘치지 않게만 눌러 준다. */
     var boardW = (boardWorld.maxX - boardWorld.minX) + 16;
     var boardH = (boardWorld.maxY - boardWorld.minY) + 16;
-
-    scale = Math.min(viewRect.w / boardW, viewRect.h / boardH);
+    scale = Math.min(pickZoom(), Math.max(viewRect.w / boardW, viewRect.h / boardH, 0.26));
     scale = Math.max(0.26, Math.min(1.15, scale));
 
     view.cx = viewRect.x + viewRect.w / 2;
@@ -1324,6 +1461,12 @@ SK.Game = (function () {
     /* 보드 안이면 구멍이라도 뛸 수 있다 — 떨어지는 것도 플레이어의 선택이다.
        (보드 밖은 여전히 막는다. 화면 밖으로 사라지면 복구할 자리가 없다) */
     canEnter: function (i, j) { return inBounds(i, j); },
+    /* 걷기는 **성한 타일 위로만** 나아간다. 빈 칸으로 걸어 나가 떨어지게 두면,
+       계속 이어지는 동작이라 한 번 삐끗할 때마다 추락해 산책이 외줄타기가 된다.
+       떨어지는 건 건너뛰기를 잘못했을 때의 일로 남긴다. */
+    canWalk: function (i, j) {
+      return inBounds(i, j) && SK.Tiles.isSolid(getTile(i, j));
+    },
     surfaceOf: function (i, j) {
       return SK.Tiles.surfaceOffset(getTile(i, j));
     }
@@ -1383,12 +1526,15 @@ SK.Game = (function () {
     updateAim(dt);
     if (player.justLanded) saveNow();
 
-    // 카메라 — 보드 중심에서 캐릭터 쪽으로 조금만 따라간다
-    var bc = world((GRID - 1) / 2, (GRID - 1) / 2, 0);
+    /* 카메라 — 캐릭터를 따라간다.
+       판이 화면보다 넓어졌으므로 더 이상 보드 중심에 매달아 둘 수 없다. 다만
+       한 칸 걸을 때마다 화면이 홱 따라오면 멀미가 나므로 부드럽게 쫓고,
+       clampCam 이 판 바깥의 빈 공간을 비추지 않게 막는다. */
     var ps = world(player.x, player.y, 0);
-    cam.x += (bc.x * 0.72 + ps.x * 0.28 - cam.x) * Math.min(1, dt * 5);
-    cam.y += (bc.y * 0.72 + ps.y * 0.28 - cam.y) * Math.min(1, dt * 5);
-    clampCam();   // 보드가 절대 화면 밖으로 밀려나지 않게
+    var k = Math.min(1, dt * 4.2);
+    cam.x += (ps.x - cam.x) * k;
+    cam.y += (ps.y - cam.y) * k;
+    clampCam();   // 판 바깥의 허공이 보이지 않게
     if (cam.shake > 0) cam.shake = Math.max(0, cam.shake - dt * 3.2);
     if (flash > 0) flash = Math.max(0, flash - dt * 2.6);
 
@@ -1404,9 +1550,12 @@ SK.Game = (function () {
 
   function updateAim(dt) {
     var target = null, holeTarget = null;
+    /* 표시하는 것은 **건너뛰기가 닿을 자리**(두 칸)다. 걷기는 방향을 누르는 즉시
+       가 버리므로 미리 보여 줄 것이 없고, 정작 미리 알아야 하는 건 "점프를 누르면
+       어디에 떨어지나"이기 때문이다. */
     if (!player.hopping && player.stunTimer <= 0 && player.aimDir) {
-      var ni = player.ci + player.aimDir.di;
-      var nj = player.cj + player.aimDir.dj;
+      var ni = player.ci + player.aimDir.di * JUMP_SPAN;
+      var nj = player.cj + player.aimDir.dj * JUMP_SPAN;
       if (worldApi.canEnter(ni, nj)) {
         target = getTile(ni, nj);
         if (!SK.Tiles.isSolid(target)) { target = null; holeTarget = { i: ni, j: nj }; }
@@ -1505,14 +1654,13 @@ SK.Game = (function () {
 
     var seen = Object.create(null), queue = [start], reached = 0;
     seen[start] = true;
-    var DIRS = SK.Player.DIRS;
     while (queue.length) {
       var parts = queue.pop().split(',');
       reached++;
-      for (var d = 0; d < DIRS.length; d++) {
-        var key = (+parts[0] + DIRS[d].di) + ',' + (+parts[1] + DIRS[d].dj);
+      eachReach(+parts[0], +parts[1], function (ni, nj) {
+        var key = ni + ',' + nj;
         if (alive[key] && !seen[key]) { seen[key] = true; queue.push(key); }
-      }
+      });
     }
     return reached === total;
   }
@@ -1859,7 +2007,7 @@ SK.Game = (function () {
     if (prog.length >= q.sequence.length) return false;
     for (i = 0; i < prog.length; i++) if (q.sequence[i] !== prog[i]) return false;
 
-    if (!(snap.grid >= 3 && snap.grid <= 12)) return false;
+    if (!(snap.grid >= 3 && snap.grid <= 24)) return false;
 
     /* 저장된 격자 크기를 그대로 쓴다. 휴대폰에서 하던 판을 PC 에서 열어도
        같은 판이어야 한다 — 화면에 맞추는 일은 resize() 의 배율이 맡는다. */
@@ -1964,6 +2112,8 @@ SK.Game = (function () {
     phase = 'play'; phaseTimer = 0;
     renderHUD(true);
     resize();
+    boardWorld = computeBoardWorld();
+    snapCamToPlayer();
     return true;
   }
 

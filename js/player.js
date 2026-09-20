@@ -1,11 +1,17 @@
 /* =============================================================
  *  소리 콩콩 — 캐릭터 컨트롤러 '콩콩이'
- *  타일이 서로 떨어져 있으므로 이동은 "한 칸 점프"로만 이뤄진다.
  *
- *   · 방향 입력(방향키/조이스틱)은 **조준만** 한다 — 그것만으로는 움직이지 않는다
- *   · 점프 버튼(점프 / Space)을 눌러야 조준한 이웃 타일로 도약한다
+ *  이동은 두 가지다.
+ *
+ *   · **걷기** — 방향 입력만으로 붙어 있는 이웃 타일로 걸어간다. 누르고 있으면
+ *     계속 걷는다. 발소리가 끊기지 않고 이어지는 구간이 여기서 나온다.
+ *   · **건너뛰기** — 점프 버튼을 누르면 조준 방향으로 **두 칸**을 뛴다. 타일이
+ *     끊긴 디딤돌 구간을 건너는 수단이다. 착지할 자리가 비어 있으면 떨어진다.
  *   · 방향 없이 점프하면 제자리에서 강하게 내려찍는다(파괴력 2배)
- *   · 연속으로 빨리 뛸수록 착지 강도가 올라가 소리 피치·음량이 커진다
+ *
+ *  예전에는 타일이 전부 떨어져 있어 "한 칸 점프"만 있었고, 방향 입력은 조준만
+ *  했다. 그러면 한 발짝마다 점프 버튼을 눌러야 해서 발소리가 뚝뚝 끊겼다 —
+ *  소리를 들으러 온 게임에서 그게 가장 아쉬운 점이었다.
  * ============================================================= */
 window.SK = window.SK || {};
 
@@ -16,6 +22,17 @@ SK.Player = (function () {
   var HOP_H = 0.62;          // 보통 도약 높이(격자 z 단위)
   var HOP_POWER_H = 1.25;
   var COOLDOWN = 0.05;       // 착지 후 다음 도약까지
+
+  /* 걷기 — 낮게, 짧게, 곧바로 다음 걸음.
+     이 셋을 합치면 초당 대여섯 걸음이 되어 발소리가 하나로 이어져 들린다.
+     더 빠르게 하면 소리가 겹쳐 뭉개지고, 더 느리면 다시 뚝뚝 끊긴다. */
+  var WALK_DUR = 0.17;
+  var WALK_H = 0.11;
+  var WALK_COOLDOWN = 0.015;
+
+  /* 건너뛰기는 **두 칸**이다. 한 칸이면 붙어 있는 타일로 뛰게 되는데 그건 걷기가
+     이미 하는 일이고, 정작 벌어진 디딤돌 구간은 건널 수가 없다. */
+  var JUMP_SPAN = 2;
   /* 방향 키를 뗀 뒤 조준이 남아 있는 시간(초).
      Game 쪽 COMBINE_MS(0.26초)가 이미 방향 입력을 붙들고 있으므로, 둘을 더한
      0.44초가 실제 유지 시간이다. 더 늘리면 제자리 내려찍기가 불편해진다. */
@@ -154,8 +171,11 @@ SK.Player = (function () {
 
     if (p.hopping) {
       advanceHop(p, dt, world, ev);
-    } else if (p.cooldown <= 0 && input.jump) {
-      tryStartHop(p, input, world, ev);
+    } else if (p.cooldown <= 0) {
+      /* 점프가 걷기보다 먼저다. 방향을 잡은 채 점프를 누르는 것이 건너뛰기이므로,
+         걷기를 먼저 보면 점프 입력이 걸음에 먹혀 영영 건너뛸 수 없다. */
+      if (input.jump) tryStartHop(p, input, world, ev);
+      else if (p.aimDir) tryWalk(p, world, ev);
     }
 
     // 발밑 타일의 윗면 높이를 부드럽게 따라가 캐릭터가 파묻히지 않게 한다
@@ -167,6 +187,34 @@ SK.Player = (function () {
     p.squash += (0 - p.squash) * Math.min(1, dt * 11);
   }
 
+  /**
+   * 걷기 — 붙어 있는 이웃 타일로 한 칸.
+   *
+   *  빈 칸으로는 걸어 나가지 않고 막힌다. 걷기는 계속 이어지는 동작이라, 한 번
+   *  삐끗할 때마다 떨어지면 산책이 아니라 외줄타기가 된다. 떨어지는 건 건너뛰기를
+   *  잘못했을 때의 일로 남겨 둔다.
+   */
+  function tryWalk(p, world, ev) {
+    var dir = p.aimDir;
+    var ni = p.ci + dir.di, nj = p.cj + dir.dj;
+    if (!world.canWalk(ni, nj)) {
+      p.blocked = 1;
+      p.facing = dir.dx !== 0 ? (dir.dx > 0 ? 1 : -1) : p.facing;
+      p.cooldown = 0.12;
+      return;
+    }
+    p.facing = dir.dx !== 0 ? (dir.dx > 0 ? 1 : -1) : p.facing;
+    p.fromI = p.ci; p.fromJ = p.cj;
+    p.ci = ni; p.cj = nj;
+    p.hopping = true;
+    p.hopT = 0;
+    p.power = 0.6;                    // 1 미만 = 걸음. 착지가 가볍고 타일이 닳지 않는다
+    p.hopDur = WALK_DUR;
+    p.hopH = WALK_H;
+    p.squash = -0.12;
+    if (ev && ev.onTakeoff) ev.onTakeoff(p.power);
+  }
+
   function tryStartHop(p, input, world, ev) {
     var dir = p.aimDir;
     // 방향을 잡고 뛰면 이동 도약, 방향 없이 뛰면 제자리 강타
@@ -174,8 +222,8 @@ SK.Player = (function () {
 
     var ni = p.ci, nj = p.cj;
     if (dir) {
-      ni = p.ci + dir.di;
-      nj = p.cj + dir.dj;
+      ni = p.ci + dir.di * JUMP_SPAN;
+      nj = p.cj + dir.dj * JUMP_SPAN;
       if (!world.canEnter(ni, nj)) {
         // 보드 밖이거나 발판이 사라진 자리 — 살짝 튕긴다
         p.blocked = 1;
@@ -204,15 +252,18 @@ SK.Player = (function () {
       p.hopT = 1;
       p.x = p.ci; p.y = p.cj; p.z = 0;
       p.hopping = false;
-      p.cooldown = COOLDOWN;
+      var walking = p.power < 1;
+      p.cooldown = walking ? WALK_COOLDOWN : COOLDOWN;
 
       p.chain = Math.min(6, p.chain + 1);
       p.chainTimer = 0.8;
 
-      // 착지 강도: 도약 높이 + 연속 도약 체인
-      var base = p.power > 1 ? 0.95 : 0.45;
-      p.landIntensity = Math.min(1, base + p.chain * 0.07);
-      p.squash = 0.5 * (p.power > 1 ? 1.5 : 1);
+      /* 착지 강도: 도약 높이 + 연속 도약 체인.
+         걸음은 체인을 얹지 않는다 — 계속 걸으면 체인이 금방 6까지 차서, 산책이
+         뒤로 갈수록 쿵쿵거리는 소리가 된다. 걸음은 처음부터 끝까지 같은 세기다. */
+      var base = walking ? 0.3 : (p.power > 1 ? 0.95 : 0.45);
+      p.landIntensity = walking ? base : Math.min(1, base + p.chain * 0.07);
+      p.squash = walking ? 0.18 : 0.5 * (p.power > 1 ? 1.5 : 1);
       p.justLanded = true;
       if (ev && ev.onLand) ev.onLand(p.landIntensity, p.power, p.ci, p.cj);
       return;
@@ -223,7 +274,7 @@ SK.Player = (function () {
     p.y = p.fromJ + (p.cj - p.fromJ) * t;
     p.z = Math.sin(Math.PI * t) * p.hopH;
     // 도약 중에는 살짝 늘어난다
-    p.squash = -0.22 * Math.sin(Math.PI * t) * (p.power > 1 ? 1.3 : 1);
+    p.squash = -0.22 * Math.sin(Math.PI * t) * (p.power > 1 ? 1.3 : p.power < 1 ? 0.45 : 1);
   }
 
   function stun(p, sec) { p.stunTimer = sec; p.chain = 0; p.aimHold = 0; p.aimDir = null; }

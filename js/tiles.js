@@ -176,7 +176,10 @@ SK.Tiles = (function () {
     t.markX = (Math.random() - 0.5) * 0.3;
     t.markY = (Math.random() - 0.5) * 0.3;
 
-    if (m.klass === 'consumable') {
+    /* 걸음(power < 1)은 타일을 닳게 하지 않는다.
+       연속으로 걷는 구간에서 한 걸음마다 내구도가 닳으면 산책길이 네 걸음 만에
+       사라져 버린다. 금이 가고 부서지는 것은 **뛰어서 내려앉을 때**의 일이다. */
+    if (m.klass === 'consumable' && power >= 1) {
       if (t.broken >= 1) return { sound: 'hollow', stage: 0, total: m.durability, gain: 0.3 };
 
       var wasPopped = t.damage * BUBBLE_PER_STEP;      // 에어캡: 지금까지 터진 알 수
