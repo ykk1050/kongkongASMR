@@ -872,36 +872,32 @@ SK.Game = (function () {
    *   3) Player 의 AIM_HOLD — 방향을 떼고 점프해도 조준이 잠깐 남아 있다.
    *  셋 다 **조준**만 돕는다. 움직이려면 반드시 점프 키를 눌러야 한다.
    */
-  /* 방향 입력을 **축마다 따로** 정한다 — 가로(x)와 세로(y).
+  /* 방향 입력은 **지금 눌려 있는 키만으로** 정한다.
    *
-   *  ⚠ 예전에는 최근에 눌린 키들을 '묶음' 하나에 모아 벡터를 전부 더했다. 그런데
-   *  뗀 키가 묶음에 그대로 남아서, 방향키를 마구 누르면 ←와 →가 한 묶음에 같이
-   *  들어가 **서로 상쇄되어 조준이 0**이 됐다. 실제로 재현했다 —
-   *  →와 ↓만 누르고 있는데도 조준선이 사라지고, 그 상태로 점프하면 제자리
-   *  내려찍기가 된다. "마구 누르면 점선이 사라진다"와 "방향키 2개 + Space가
-   *  안 먹는다"가 같은 원인이었다.
+   *  ⚠ 두 번 틀렸던 자리다.
+   *   1) 최근에 눌린 키들을 '묶음' 하나에 모아 전부 더했다. 뗀 키가 묶음에 남아
+   *      ←와 →가 같이 들어가면 **서로 상쇄되어 조준이 0**이 됐다. →와 ↓만 누르고
+   *      있는데 조준선이 사라지고, 그 상태로 점프하면 제자리 내려찍기가 됐다.
+   *   2) 그래서 축마다 '최근에 톡 누른 키 하나'를 기억하게 고쳤다. 상쇄는 사라졌지만
+   *      이번엔 **뗀 키가 그 축을 계속 맡았다.** ↑+→ 로 비스듬히 걷다가 → 만 떼도
+   *      → 의 기억이 가로축에 남아 계속 ↗ 로 갔다. 위로 가려고 손가락을 하나 뗐는데
+   *      방향이 그대로인 것이다. 재현해 보니 ↑ 만 남겨도, → 만 남겨도 둘 다 ↗ 였다.
    *
-   *  규칙을 뒤집었다.
-   *    · 그 축에 **지금 눌려 있는 키가 하나라도 있으면 그것만으로** 값을 정한다.
-   *      (←와 →를 실제로 같이 누르고 있으면 0이 맞다 — 그건 의도된 상쇄다)
-   *    · 눌린 키가 없는 축만 **가장 최근에 톡 눌린 키 하나**로 채운다.
-   *      축마다 하나만 기억하므로 반대 방향이 누적될 수 없다.
+   *  두 번 다 원인이 같다 — **떼어 놓고도 남아 있는 키**다. 그래서 규칙을 하나로
+   *  줄였다: 방향 키가 하나라도 눌려 있으면 **눌린 것만** 더한다. 뗀 키는 그
+   *  즉시 빠진다. (←와 →를 실제로 같이 누르고 있으면 0이 맞다 — 의도된 상쇄다.)
    *
-   *  이러면 ↓ 톡 → 톡(순차 입력)도, ↓+→ 동시 누르기도 똑같이 대각선이 되고,
-   *  아무리 마구 눌러도 조준이 0에 갇히지 않는다. */
-  /*  수명은 축마다 따로 세지 않고 **마지막 방향 입력 하나**를 기준으로 함께 센다.
-   *  `↓` 톡 `→` 톡 처럼 이어 누를 때, 먼저 누른 ↓ 가 혼자 만료돼 버리면 마지막
-   *  순간에 대각선이 풀리기 때문이다. 이어지는 동안에는 함께 살아 있고, 손을
-   *  멈추면 함께 사라진다.
+   *  기억은 **다 뗐을 때만** 쓴다. 방향을 잡았다 떼고 점프하는 흐름을 위해서다
+   *  (대각선+점프는 세 키 동시인데, 값싼 키보드는 그 조합을 삼킨다). 마지막으로
+   *  눌려 있던 방향 하나를 TAP_HOLD_MS 동안 들고 있다가 지운다.
    *
-   *  CHAIN_MS 보다 오래 쉬었다가 새로 누르면 **이전 조준을 버리고 새로 시작**한다.
-   *  그래야 한참 전에 눌렀던 ← 가 지금 누른 ↑ 에 멋대로 붙어 ↖ 가 되지 않는다. */
-  var TAP_HOLD_MS = 420;     // 마지막 방향 입력 뒤 톡 기억이 유지되는 시간
-  var CHAIN_MS = 450;        // 이 간격 안에 이어 누르면 같은 조준으로 합친다
+   *  '↑ 톡 → 톡을 ↗ 로 합치던' 규칙(CHAIN_MS)은 걷어냈다. 걷기가 생긴 뒤로는
+   *  방향을 톡 누르면 그 자리에서 한 칸 걸어가 버리므로, 합칠 '조준'이 애초에
+   *  남지 않는다. 방향키 패드도 같은 이유로 이미 합치기를 뺐다. */
+  var TAP_HOLD_MS = 420;     // 다 뗀 뒤 마지막 조준이 남아 있는 시간
 
-  var tapX = { code: null };
-  var tapY = { code: null };
-  var lastDirAt = -1e9;      // 마지막 방향 키 입력 시각
+  var lastDir = { x: 0, y: 0 };   // 마지막으로 '눌려 있던' 방향
+  var lastDirAt = -1e9;           // 그때의 시각
   var KEYDIR = {
     ArrowUp: [0, -1], KeyW: [0, -1],
     ArrowDown: [0, 1], KeyS: [0, 1],
@@ -933,18 +929,6 @@ SK.Game = (function () {
       }
       if (!KEYDIR[e.code]) return;
       e.preventDefault();
-      /* e.repeat 으로 자동 반복을 거른다. input.keys 로 판별하면, keyup 이 유실돼
-         계속 '눌린 상태'로 남은 키는 다시 눌러도 새 입력으로 인정되지 않는다 —
-         키가 통째로 죽어 버린다. e.repeat 은 그 상황에서도 false 로 오므로
-         유실된 keyup 을 저절로 복구하는 효과가 있다. */
-      if (!e.repeat) {
-        var tnow = performance.now();
-        // 한참 쉬었다 누른 것이면 이전 조준은 버리고 새로 시작한다
-        if (tnow - lastDirAt > CHAIN_MS) { tapX.code = null; tapY.code = null; }
-        if (KEYDIR[e.code][0]) tapX.code = e.code;
-        if (KEYDIR[e.code][1]) tapY.code = e.code;
-        lastDirAt = tnow;
-      }
       input.keys[e.code] = true;
       if (keyLog) logKey('down', e.code);
       if (diagEl) pushDiag('down', e.code);
@@ -968,7 +952,7 @@ SK.Game = (function () {
     });
     window.addEventListener('blur', function () {
       input.keys = Object.create(null);
-      tapX.code = tapY.code = null;
+      lastDir.x = lastDir.y = 0;
       lastDirAt = -1e9;
       input.jumpHeld = false;
       syncKeyDir();
@@ -1032,41 +1016,36 @@ SK.Game = (function () {
         '</div>';
   }
 
-  /** 톡 입력 기억을 비운다 — 뛰고 나면 새로 잡아야 한다.
-      누르고 있는 키는 어차피 '눌린 키' 쪽에서 읽으므로 따로 남길 필요가 없다. */
+  /** 남은 조준 기억을 비운다 — 뛰고 나면 새로 잡아야 한다.
+      누르고 있는 키는 어차피 다음 프레임에 다시 읽히므로 잃을 게 없다. */
   function clearKeyCombine() {
-    tapX.code = tapY.code = null;
+    lastDir.x = lastDir.y = 0;
     lastDirAt = -1e9;
   }
 
-  /**
-   * 한 축(0=가로, 1=세로)의 값을 정한다.
-   * 지금 눌려 있는 키가 있으면 그것만 쓰고, 없을 때만 최근에 톡 누른 키로 채운다.
-   */
-  function axisValue(idx, tap, tapAlive) {
-    var sum = 0, live = false;
-    for (var code in KEYDIR) {
-      var v = KEYDIR[code][idx];
-      if (!v || !input.keys[code]) continue;
-      sum += v; live = true;
-    }
-    if (live) return Math.max(-1, Math.min(1, sum));
-    if (tapAlive && tap.code) return KEYDIR[tap.code][idx];
-    return 0;
-  }
+  function clamp1(v) { return v < -1 ? -1 : (v > 1 ? 1 : v); }
 
-  /** 축마다 따로 값을 정한다 — 반대 방향이 누적돼 조준이 0에 갇히지 않게 */
+  /** 눌려 있는 방향 키만 더해 조준을 정한다. 다 뗐을 때만 마지막 조준이 잠깐 남는다. */
   function syncKeyDir() {
     if (padActive) return;                 // 조이스틱을 잡고 있으면 그쪽이 우선
-    var tnow = performance.now();
-    // 누르고 있는 키가 있으면 톡 기억의 수명을 계속 갱신한다 — 누른 채로 있는 동안
-    // 조준이 저절로 풀리지 않게, 그리고 keyup 이 유실돼도 곧바로 무너지지 않게
-    for (var h in KEYDIR) { if (input.keys[h]) { lastDirAt = tnow; break; } }
-    var tapAlive = tnow - lastDirAt < TAP_HOLD_MS;
-    var x = axisValue(0, tapX, tapAlive);
-    var y = axisValue(1, tapY, tapAlive);
-    input.dx = x;
-    input.dy = y;
+    var tnow = performance.now(), x = 0, y = 0, held = false;
+    for (var c in KEYDIR) {
+      if (!input.keys[c]) continue;
+      x += KEYDIR[c][0]; y += KEYDIR[c][1];
+      held = true;
+    }
+    if (held) {
+      /* 뗀 키는 그 즉시 빠진다 — ↑+→ 로 걷다 → 만 떼면 곧바로 ↑ 가 된다.
+         예전에는 뗀 → 의 기억이 가로축에 남아 계속 ↗ 로 갔다. */
+      input.dx = lastDir.x = clamp1(x);
+      input.dy = lastDir.y = clamp1(y);
+      lastDirAt = tnow;
+      return;
+    }
+    // 다 뗀 뒤 — 방향을 잡았다 떼고 점프할 수 있게 마지막 조준을 잠깐 들고 있는다
+    var alive = tnow - lastDirAt < TAP_HOLD_MS;
+    input.dx = alive ? lastDir.x : 0;
+    input.dy = alive ? lastDir.y : 0;
   }
 
   /* =========================================================
@@ -1119,26 +1098,12 @@ SK.Game = (function () {
         if (keyEls[code]) keyEls[code].classList.toggle('on', !!on[code]);
       }
 
-      /* 새로 누른 칸이 있을 때만 톡 기억을 갱신한다. 손을 뗄 때 갱신하면
-         조준이 영영 살아 있게 되고, 아무것도 안 누른 채로도 점프가 나간다. */
-      if (pressedNow) {
-        /* 패드의 한 칸은 **그 자체로 완결된 방향**이다. 그래서 누를 때마다 이전
-           톡 기억을 통째로 버리고 지금 눌린 칸만으로 다시 세운다.
-           키보드에는 "짧은 간격 안에 이어 누른 두 방향키를 대각선으로 합치는"
-           규칙(CHAIN_MS)이 있는데, 그걸 패드에도 적용했던 게 문제였다 —
-           ↑ 를 눌렀다 곧바로 → 를 누르면 ↑ 의 세로 성분이 남아 →가 아니라 ↗가
-           됐다. 0.45초를 기다려야 비로소 원하는 방향이 나왔다.
-           한 축만 덮는 상하좌우에서만 새던 버그라, 두 축을 모두 덮는 대각선
-           칸에서는 멀쩡해 보였다. */
-        tapX.code = null; tapY.code = null;
-        for (var m = 0; m < DPAD_KEYS.length; m++) {
-          if (!on[DPAD_KEYS[m]]) continue;
-          if (KEYDIR[DPAD_KEYS[m]][0]) tapX.code = DPAD_KEYS[m];
-          if (KEYDIR[DPAD_KEYS[m]][1]) tapY.code = DPAD_KEYS[m];
-        }
-        lastDirAt = performance.now();
-        if (diagEl) pushDiag('down', pressedNow);
-      }
+      /* 패드의 한 칸은 **그 자체로 완결된 방향**이다. 누른 칸만 더하면 되므로
+         따로 기억을 손볼 게 없다 — syncKeyDir 이 눌린 칸만 읽는다.
+         (예전에는 패드에도 '이어 누른 두 방향을 합치는' 규칙을 적용해서, ↑ 를
+         눌렀다 곧바로 → 를 누르면 ↑ 의 세로 성분이 남아 ↗ 가 됐다. 키보드에서도
+         같은 뿌리의 문제가 있어 두 곳 모두 눌린 것만 보도록 정리했다.) */
+      if (pressedNow && diagEl) pushDiag('down', pressedNow);
       syncKeyDir();
     }
 
@@ -2565,9 +2530,10 @@ SK.Game = (function () {
       input: function () {
         var held = [], buf = [], tnow = performance.now();
         for (var c in KEYDIR) if (input.keys[c]) held.push(c);
-        var tapAlive = tnow - lastDirAt < TAP_HOLD_MS;
-        if (tapAlive && tapX.code) buf.push('x:' + tapX.code);
-        if (tapAlive && tapY.code) buf.push('y:' + tapY.code);
+        // 다 뗀 뒤 남아 있는 조준(점프를 기다리는 동안 살아 있는 것)
+        if (!held.length && tnow - lastDirAt < TAP_HOLD_MS && (lastDir.x || lastDir.y)) {
+          buf.push(lastDir.x + ',' + lastDir.y);
+        }
         var d = player && player.aimDir;
         return {
           dx: input.dx, dy: input.dy, jumpPending: jumpPending(),
