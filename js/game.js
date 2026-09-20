@@ -1562,9 +1562,23 @@ SK.Game = (function () {
       // 이 걸음으로 눌림 하나를 썼다. 남겨 두면 그것으로 또 한 칸 간다.
       input.dirTapAt = -1e9;
     }
-    // 뛸 기회가 있었던 프레임에서만 점프 요청을 소비한다.
-    // 못 뛰는 구간이거나 방향을 기다리는 중이면 그대로 남겨 둔다.
-    if (couldAct && !waitingForAim) consumeJump();
+    /* 점프 요청을 소비한다 — 뛸 기회가 있었거나, **실제로 뛰었으면**.
+     *
+     *  ⚠ 'couldAct' 만으로 판단하면 한 프레임 어긋난다. couldAct 는 update 전에
+     *  재는데, 쿨다운을 깎는 것은 update 안이다. 그래서 **쿨다운이 바로 이 프레임에
+     *  끝나면서 도약이 나가는 순간**에는 couldAct 가 아직 false 라, 뛰어 놓고도
+     *  요청이 남았다. 남은 요청은 JUMP_STALE_MS(0.9초) 동안 살아서 착지할 때마다
+     *  다시 발사됐다 — 한 번 누른 Space 로 두 번, 세 번 뛰었다.
+     *
+     *  재현 기록: 108ms 에 Space, 142ms 1차 도약, 509ms 2차, 892ms 3차(제자리
+     *  내려찍기), 1009ms 에야 만료로 꺼짐. 쿨다운이 끝나는 프레임에 요청이
+     *  걸려야 하므로 늘 나지는 않고 절반쯤 났다.
+     *
+     *  그래서 예측(couldAct) 대신 **결과**도 함께 본다 — 이 프레임에 도약이
+     *  시작됐으면 그 요청은 쓴 것이다. 요청이 살아 있는 동안 wantJump 는 참이므로,
+     *  이때의 도약은 걸음이 아니라 반드시 점프다. */
+    var tookOff = !wasHopping && player.hopping;
+    if ((couldAct || tookOff) && !waitingForAim) consumeJump();
 
     // 점프 궤적 (소리 ↔ 시각 연결)
     if (player.hopping && Math.random() < 0.55) {
