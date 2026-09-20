@@ -1172,49 +1172,66 @@ SK.Game = (function () {
    *  · 원점은 패드 한가운데가 아니라 **손가락이 처음 닿은 자리**다(플로팅 스틱).
    *    고정 원점이면 패드 가장자리를 짚는 순간 그 방향이 곧바로 입력돼서,
    *    "잡자마자 엉뚱한 데를 조준한다"가 된다.
-   *  · 손가락이 반경 밖으로 나가면 원점이 따라가며(리센터) 스틱이 계속 살아 있다.
    *  · 데드존은 픽셀이 아니라 반경 비율로 잡는다 — 화면 크기가 달라도 감이 같다.
+   *
+   *  ⚠ 두 가지를 고쳤다. 둘 다 재현해서 확인한 것이다.
+   *
+   *   1) **원점이 손가락을 따라다녔다.** 반경 밖으로 밀면 원점을 끌고 가서 스틱이
+   *      계속 살아 있게 했는데, 그러면 원점이 어디인지 손이 알 수 없다. 끝까지
+   *      밀었다가 처음 짚은 자리로 되돌려도 **멈추지 않았다**(되돌린 뒤에도
+   *      조준이 → 로 남아 있었다). 멈추질 못하니 원하는 칸을 지나쳐 계속 걸었다.
+   *      이제 원점은 처음 짚은 자리에 **못 박아** 두고, 세기만 반경에서 멈춘다.
+   *      짚은 자리로 돌아오면 반드시 선다.
+   *
+   *   2) **평활이 손가락이 움직일 때만 돌았다.** pointermove 안에서 한 칸씩
+   *      다가가는 구조라, 휙 옮기고 손을 멈추면 그 자리에서 **굳었다.** ↑ 에서
+   *      → 로 휙 옮기면 중간에 굳어 방향이 아예 안 잡히거나(없음) ↗ 가 됐다.
+   *      이제 손가락은 목표만 적어 두고, 평활은 매 프레임 dt 로 돈다. 손을
+   *      멈춰도 목표까지 끝까지 간다.
    */
   var DEAD = 0.26;          // 반경 대비 데드존
-  var SMOOTH = 0.45;        // 방향 벡터 지수 평활 — 손 떨림을 걸러 낸다
+  /* 지수 평활의 '60fps 한 프레임당' 비율. 실제로는 dt 로 환산해 쓴다 —
+     프레임이 느린 기기에서 스틱이 굼떠지지 않게. */
+  var SMOOTH = 0.45;
 
   function bindStick(pad) {
     var nub = document.getElementById('touchNub');
     padAimEl = document.getElementById('touchAim');
 
     var padId = null, cx = 0, cy = 0, radius = 46;
-    var sx = 0, sy = 0;                              // 평활된 방향 벡터
+    var sx = 0, sy = 0;                  // 평활된 방향 벡터(화면에 나가는 값)
+    var rawX = 0, rawY = 0;              // 손가락이 가리키는 목표 — 평활의 도착점
 
+    /** 손가락 위치를 목표 벡터로 옮겨 적는다. 값을 굴리는 건 tick 이 한다. */
     function updateFrom(e) {
       var dx = e.clientX - cx, dy = e.clientY - cy;
       var len = Math.hypot(dx, dy);
 
-      // 반경을 넘어가면 원점을 끌고 간다 — 손가락이 패드 밖으로 나가도 계속 조작된다
-      if (len > radius) {
-        var over = (len - radius) / len;
-        cx += dx * over; cy += dy * over;
-        dx -= dx * over; dy -= dy * over;
-        len = radius;
-      }
+      /* 원점은 **고정**이다. 반경을 넘으면 세기만 반경에서 멈춘다 — 손가락은
+         패드 밖으로 나가도 되지만, 짚은 자리로 돌아오면 반드시 선다. */
+      var show = len > radius ? radius / len : 1;
+      nub.style.transform = 'translate(' + (dx * show) + 'px,' + (dy * show) + 'px)';
 
-      nub.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
-
-      var mag = len / radius;
-      if (mag < DEAD) {
-        sx = sy = 0;
-        input.dx = 0; input.dy = 0;
-        setDirHeld(false);
-        if (padAimEl) padAimEl.style.opacity = '0';
-        return;
-      }
+      var mag = Math.min(1, len / radius);
+      if (mag < DEAD) { rawX = rawY = 0; return; }
       // 데드존 바깥을 0~1로 다시 펼친다(데드존 경계에서 값이 튀지 않게)
       var k = (mag - DEAD) / (1 - DEAD) / len;
-      var tx = dx * k, ty = dy * k;
-      sx += (tx - sx) * SMOOTH;
-      sy += (ty - sy) * SMOOTH;
+      rawX = dx * k; rawY = dy * k;
+    }
+
+    /* 평활은 **매 프레임** 돈다. pointermove 안에서만 돌리면, 휙 옮기고 손을
+       멈춘 순간 중간값에서 굳어 엉뚱한 방향이 잡힌다. */
+    function tick(dt) {
+      if (!padActive) return;
+      var a = 1 - Math.pow(1 - SMOOTH, Math.max(0, dt) * 60);
+      sx += (rawX - sx) * a;
+      sy += (rawY - sy) * a;
+      // 목표가 0이면 완전히 0까지 내려놓는다 — 꼬리가 남아 계속 걷지 않게
+      if (!rawX && !rawY && Math.hypot(sx, sy) < 0.02) sx = sy = 0;
       input.dx = sx; input.dy = sy;
       setDirHeld(!!(sx || sy));
-      showPadAim(radius);
+      if (sx || sy) showPadAim(radius);
+      else if (padAimEl) padAimEl.style.opacity = '0';
     }
 
     /** 스틱이 어느 칸으로 확정됐는지 패드 위에 점으로 보여 준다 */
@@ -1243,7 +1260,7 @@ SK.Game = (function () {
       var od = Math.hypot(ox, oy);
       var pull = od > radius ? radius / od : 1;
       cx = mx + ox * pull; cy = my + oy * pull;
-      sx = sy = 0;
+      sx = sy = 0; rawX = rawY = 0;
       input.dx = 0; input.dy = 0;
       setDirHeld(false);
       nub.style.transform = 'translate(' + (cx - mx) + 'px,' + (cy - my) + 'px)';
@@ -1257,7 +1274,7 @@ SK.Game = (function () {
     function endPad(e) {
       if (padId !== null && e && e.pointerId !== padId) return;
       padId = null; padActive = false;
-      sx = sy = 0;
+      sx = sy = 0; rawX = rawY = 0;
       input.dx = 0; input.dy = 0;
       setDirHeld(false);
       nub.style.transform = '';
@@ -1268,10 +1285,12 @@ SK.Game = (function () {
     pad.addEventListener('pointerup', endPad);
     pad.addEventListener('pointercancel', endPad);
 
+    stickTick = tick;
     return function reset() { endPad(null); };
   }
 
   var resetDpad = null, resetStick = null;
+  var stickTick = null;           // 조이스틱 평활 — loop 에서 매 프레임 돌린다
 
   /** 컨트롤을 바꾸거나 끌 때 — 누른 채로 남은 입력이 다음 화면까지 따라가지 않게 */
   function clearTouchInput() {
@@ -1501,6 +1520,7 @@ SK.Game = (function () {
 
     // 점프 입력은 '눌림 유지' 방식 — 조준을 먼저 잡고 눌러도, 누른 채 조준을 바꿔도 뛴다
     // 톡 입력(TAP_HOLD_MS)은 키 이벤트가 없어도 만료돼야 하므로 매 프레임 다시 센다
+    if (stickTick) stickTick(dt);   // 조이스틱 평활은 손가락이 멈춰도 계속 간다
     syncKeyDir();
 
     // 이번 프레임에 플레이어가 '뛸 수 있는 상태'였는가 — 요청 소비 판단의 기준
