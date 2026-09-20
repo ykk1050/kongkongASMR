@@ -292,6 +292,8 @@ SK.Game = (function () {
    */
   function buildWorld(keep) {
     boardSeed = (Math.random() * 0x7fffffff) | 0;
+    // 지난 판의 씨앗으로 구워 둔 타일 그림은 다시 쓸 일이 없다
+    if (SK.Tiles.clearArtCache) SK.Tiles.clearArtCache();
     tiles = []; tileAt = {};
     var cells = carveWalkway(keep);
     for (var n = 0; n < cells.length; n++) {

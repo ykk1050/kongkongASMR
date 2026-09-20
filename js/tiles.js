@@ -320,7 +320,7 @@ SK.Tiles = (function () {
     ctx.fill();
 
     // 재질 고유의 표면 구조 — 여기서 "무슨 소리가 날지" 알 수 있다
-    ART[m.art](ctx, t, m, sx, topY, hw, hh, now);
+    drawArt(ctx, t, m, sx, topY, hw, hh, now);
 
     /* 소리와 동기화된 발광 + 표면을 가로지르는 접촉 파문.
        소리는 '한 점에서 퍼져 나가는 것'인데 지금까지는 타일 전체가 한꺼번에
@@ -465,6 +465,106 @@ SK.Tiles = (function () {
   /* =========================================================
    *  재질별 윗면 아트 — 실루엣만 봐도 소리가 예상되게
    * ======================================================= */
+  /* =========================================================
+   *  타일 그림 캐시
+   *
+   *  자갈 한 칸에는 조약돌 26개가 들어 있고, 돌마다 방사형 그라데이션을 **매
+   *  프레임 새로** 만들고 있었다. 판이 화면보다 넓어지면서 한 화면에 깔리는
+   *  타일이 20칸에서 80칸으로 늘자 한 프레임이 26ms — 60fps 예산(16.7ms)을
+   *  훌쩍 넘겨 눈에 보이게 버벅였다(그라데이션만 빼도 12ms로 줄었다).
+   *
+   *  그림이 움직이지 않는 재질은 **한 번 그려 두고 가져다 쓴다.** 움직이는 넷
+   *  (jelly·slime·snow·water)만 매 프레임 그린다.
+   *
+   *  구울 때는 **지금 화면 배율 그대로** 굽는다. 안 그러면 blit 할 때 늘어나
+   *  흐려진다. 배율은 캔버스 변환 행렬에서 읽어 오므로 따로 넘겨받을 필요가 없다.
+   * ======================================================= */
+  var ART_LIVE = { jelly: 1, slime: 1, water: 1 };
+  /* 여백(그림이 다이아몬드 밖으로 나오는 양)은 **재서 정한다.**
+     눈대중으로 16px 을 줬더니 자갈·모래·스펀지·종이·솜에서 그림이 잘렸다
+     (알파가 255에서 0으로 뚝 끊겼다). 재질마다 삐져나오는 양이 달라서, 한 값으로
+     맞추면 어딘가는 반드시 잘리거나 어딘가는 캔버스가 쓸데없이 커진다.
+     그래서 재질마다 한 번, 넉넉한 캔버스에 그려 알파 경계를 재 둔다. */
+  var ART_PAD_MAX = 90;
+  var artPad = Object.create(null);
+
+  function padOf(m, t, hw, hh) {
+    var k = m.art;
+    if (artPad[k] != null) return artPad[k];
+    artPad[k] = ART_PAD_MAX;                 // 재는 동안 잘리지 않게 최대값
+    if (typeof document === 'undefined') return artPad[k];
+
+    var P = ART_PAD_MAX, W = (hw + P) * 2, H = (hh + P) * 2;
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var c = cv.getContext('2d');
+    var probe = make(0, 0, t.mat);
+    var over = 0, seeds = [0.2, 1.234, 2.7, 4.1, 5.9];
+    for (var si = 0; si < seeds.length; si++) {
+      for (var dmg = 0; dmg <= (m.durability || 0); dmg++) {
+        c.clearRect(0, 0, W, H);
+        probe.seed = seeds[si]; probe.damage = dmg;
+        ART[k](c, probe, m, W / 2, H / 2, hw, hh, 0);
+        var d = c.getImageData(0, 0, W, H).data;
+        for (var y = 0; y < H; y++) {
+          for (var x = 0; x < W; x++) {
+            if (d[(y * W + x) * 4 + 3] < 8) continue;
+            var ox = Math.max((W / 2 - hw) - x, x - (W / 2 + hw));
+            var oy = Math.max((H / 2 - hh) - y, y - (H / 2 + hh));
+            if (ox > over) over = ox;
+            if (oy > over) over = oy;
+          }
+        }
+      }
+    }
+    artPad[k] = Math.min(ART_PAD_MAX, Math.ceil(over) + 3);   // 3px 안전 여유
+    return artPad[k];
+  }
+  /* 한 판이 80칸 남짓이므로 넉넉히 200. 판을 새로 깔 때 비우므로 실제로는
+     여기까지 차지 않는다 — 이건 혹시 모를 폭주를 막는 빗장이다. */
+  var ART_MAX = 200;
+  var artCache = Object.create(null), artCount = 0;
+
+  var artCacheOn = true;     // 개발용 — 캐시를 끄고 같은 판을 비교할 때 쓴다
+
+  function drawArt(ctx, t, m, sx, topY, hw, hh, now) {
+    var fn = ART[m.art], over = ART_OVER[m.art];
+    if (!artCacheOn || ART_LIVE[m.art] || typeof document === 'undefined' || !ctx.getTransform) {
+      fn(ctx, t, m, sx, topY, hw, hh, now);
+      if (over) over(ctx, t, m, sx, topY, hw, hh, now);
+      return;
+    }
+    var tr = ctx.getTransform();
+    var sc = Math.abs(tr.a) || 1;
+    if (!(sc > 0.05 && sc < 8)) {
+      fn(ctx, t, m, sx, topY, hw, hh, now);
+      if (over) over(ctx, t, m, sx, topY, hw, hh, now);
+      return;
+    }
+    /* 배율은 **뭉치지 않고 그대로** 쓴다. 0.05 단위로 뭉쳤더니 구운 그림과 화면
+       배율이 미세하게 어긋나 blit 할 때 재표본되면서 가장자리가 흐려졌다(픽셀
+       5%가 달라졌다). 배율은 창 크기가 바뀔 때만 변하므로 그대로 써도 캐시가
+       잘게 쪼개지지 않는다. */
+    sc = Math.round(sc * 1000) / 1000;
+
+    var key = m.art + '|' + (t.seed || 0).toFixed(3) + '|' + (t.damage | 0) + '|' + sc;
+    var img = artCache[key];
+    if (!img) {
+      if (artCount >= ART_MAX) { artCache = Object.create(null); artCount = 0; }
+      var pad = padOf(m, t, hw, hh);
+      var w = (hw + pad) * 2, h = (hh + pad) * 2;
+      var cv = document.createElement('canvas');
+      cv.width = Math.ceil(w * sc); cv.height = Math.ceil(h * sc);
+      var c2 = cv.getContext('2d');
+      c2.scale(sc, sc);
+      fn(c2, t, m, w / 2, h / 2, hw, hh, now);
+      img = { cv: cv, w: w, h: h };
+      artCache[key] = img; artCount++;
+    }
+    ctx.drawImage(img.cv, sx - img.w / 2, topY - img.h / 2, img.w, img.h);
+    if (over) over(ctx, t, m, sx, topY, hw, hh, now);
+  }
+
   var ART = {
 
     /* 기계식 키캡: 오목한 상판 + 도톰한 테두리 + 스쿱 반사 */
@@ -979,26 +1079,6 @@ SK.Tiles = (function () {
         ctx.beginPath(); ctx.arc(gx, gy, 0.7 + rnd1(t.seed, g) * 0.9, 0, 6.2832); ctx.fill();
       }
 
-      // 4) 반짝임 — 결정 하나하나가 각도에 따라 번쩍인다. 서로 다른 위상으로 천천히
-      //    깜빡이게 하면 정지 화면에서도 눈밭이 살아 있다.
-      for (var k = 0; k < 9; k++) {
-        var a2 = t.seed * 1.7 + k * 0.897;
-        var rr = 0.16 + (k % 5) * 0.15;
-        var sx2 = cx + Math.cos(a2) * hw * rr, sy2 = cy + Math.sin(a2) * hh * rr;
-        var tw = 0.35 + 0.65 * Math.max(0, Math.sin((now || 0) * 1.6 + t.seed + k * 2.2));
-        var len = (3.0 + (k % 3) * 1.4) * (0.6 + tw * 0.6);
-        ctx.globalAlpha = 0.25 + tw * 0.75;
-        ctx.strokeStyle = (k % 3 === 0) ? 'rgba(198,226,255,.95)' : 'rgba(255,255,255,.98)';
-        ctx.lineWidth = 1.2; ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(sx2 - len, sy2); ctx.lineTo(sx2 + len, sy2);
-        ctx.moveTo(sx2, sy2 - len * 0.6); ctx.lineTo(sx2, sy2 + len * 0.6);
-        ctx.stroke();
-        ctx.beginPath(); ctx.arc(sx2, sy2, 1.1, 0, 6.2832);
-        ctx.fillStyle = 'rgba(255,255,255,1)'; ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-
       // 5) 다져진 자국 — 눌린 바닥은 푸르게 가라앉고, 밀려난 눈이 흰 테두리로 솟는다
       if (t.damage > 0) {
         var dd = Math.min(1, t.damage / 2);
@@ -1423,6 +1503,39 @@ SK.Tiles = (function () {
     }
   };
 
+  /* 캐시 위에 덧그리는 '살아 있는 층'.
+     ART 는 씨앗·damage 가 같으면 결과가 같아야 캐시가 성립한다. 그런데 눈의
+     반짝임은 now 를 읽어 매 프레임 달라진다 — 그 한 덩어리 때문에 눈 전체가
+     캐시에서 빠져, 둔덕의 방사형 그라디언트 8개를 타일마다 매 프레임 다시
+     그려야 했다(한 판에 72ms, 솜 바닥의 세 배). 그래서 변하지 않는 부분만
+     굽고, 반짝임은 구운 그림 위에 실시간으로 얹는다. */
+  var ART_OVER = {
+    snow: function (ctx, t, m, cx, cy, hw, hh, now) {
+      ctx.save();
+      diamond(ctx, cx, cy, 0.99, 0.99); ctx.clip();
+      // 4) 반짝임 — 결정 하나하나가 각도에 따라 번쩍인다. 서로 다른 위상으로 천천히
+      //    깜빡이게 하면 정지 화면에서도 눈밭이 살아 있다.
+      for (var k = 0; k < 9; k++) {
+        var a2 = t.seed * 1.7 + k * 0.897;
+        var rr = 0.16 + (k % 5) * 0.15;
+        var sx2 = cx + Math.cos(a2) * hw * rr, sy2 = cy + Math.sin(a2) * hh * rr;
+        var tw = 0.35 + 0.65 * Math.max(0, Math.sin((now || 0) * 1.6 + t.seed + k * 2.2));
+        var len = (3.0 + (k % 3) * 1.4) * (0.6 + tw * 0.6);
+        ctx.globalAlpha = 0.25 + tw * 0.75;
+        ctx.strokeStyle = (k % 3 === 0) ? 'rgba(198,226,255,.95)' : 'rgba(255,255,255,.98)';
+        ctx.lineWidth = 1.2; ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(sx2 - len, sy2); ctx.lineTo(sx2 + len, sy2);
+        ctx.moveTo(sx2, sy2 - len * 0.6); ctx.lineTo(sx2, sy2 + len * 0.6);
+        ctx.stroke();
+        ctx.beginPath(); ctx.arc(sx2, sy2, 1.1, 0, 6.2832);
+        ctx.fillStyle = 'rgba(255,255,255,1)'; ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  };
+
   /**
    * 부서진 자리 — 어두운 구멍과 삐죽삐죽한 테두리.
    * 이 구멍은 그대로 남는다. 다시 채워지지 않는다.
@@ -1645,6 +1758,12 @@ SK.Tiles = (function () {
     isConsumable: isConsumable,
     make: make,
     retexture: retexture,
+    /** 개발용 — 그림 캐시를 껐다 켠다(캐시가 그림을 바꾸지 않는지 비교할 때) */
+    setArtCache: function (on) { artCacheOn = !!on; artCache = Object.create(null); artCount = 0; return artCacheOn; },
+    /** 판을 새로 깔 때 부른다 — 지난 판의 씨앗으로 구운 그림은 다시 쓸 일이 없다 */
+    clearArtCache: function () { artCache = Object.create(null); artCount = 0; },
+    /** 개발용 — 재질별로 그림이 타일 밖으로 나오는 양(px) */
+    artPads: function () { var o = {}; for (var k in artPad) o[k] = artPad[k]; return o; },
     stomp: stomp,
     update: update,
     draw: draw,
