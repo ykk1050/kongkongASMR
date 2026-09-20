@@ -56,6 +56,13 @@ def validate(doc):
         if q.get('subject') not in VALID_SUBJECTS:
             warns.append('%s: subject "%s" -> social 로 대체됨' % (qid, q.get('subject')))
 
+        # 주제는 subjects 에 적어 둔 목록 안이어야 한다 — HUD 에 그대로 뜨므로
+        # 목록에 없는 주제를 쓰면 화면에만 낯선 이름이 하나 튀어나온다.
+        topics = (doc.get('subjects', {}).get(q.get('subject'), {}) or {}).get('topics')
+        if topics and q.get('topic') and q['topic'] not in topics:
+            warns.append('%s: topic "%s" 은(는) subjects 에 없는 주제입니다 (%s)'
+                         % (qid, q['topic'], ' · '.join(topics)))
+
         material = q.get('material')
         if material and material not in VALID_MATERIALS:
             warns.append('%s: material "%s" 는 알 수 없음 -> 기본값 사용' % (qid, material))
@@ -90,7 +97,14 @@ def validate(doc):
                     if len(str(item)) > 1:
                         warns.append('%s: 토큰 "%s" 은 여러 글자라 한 글자씩 분해됩니다' % (qid, item))
             seq = tokens_of(raw_seq)
-            decoys = [t for t in tokens_of(q.get('decoys')) if t not in seq]
+            raw_decoys = tokens_of(q.get('decoys'))
+            decoys = [t for t in raw_decoys if t not in seq]
+            # 정답에 이미 있는 글자를 미끼로 적어도 로더가 조용히 버린다.
+            # 판에 나오지도 않는데 데이터에는 남아 있으니, 적은 사람이 알아야 한다.
+            dropped = sorted(set(t for t in raw_decoys if t in seq))
+            if dropped:
+                warns.append('%s: 미끼 %s 은(는) 정답에도 있는 글자라 버려집니다 — 다른 글자로 바꾸세요'
+                             % (qid, ', '.join('"%s"' % t for t in dropped)))
 
         if not seq:
             errors.append('%s: 밟을 토큰이 하나도 없음' % qid)
@@ -128,7 +142,9 @@ def main():
         u' */\n'
     )
     body = header + u'window.SK_QUIZ_FALLBACK = ' + json.dumps(doc, ensure_ascii=False, indent=2) + u';\n'
-    with io.open(DST, 'w', encoding='utf-8') as f:
+    # 줄바꿈을 CRLF 로 못 박는다. 저장소가 CRLF 인데 newline 을 안 주면 실행한 OS 를
+    # 따라가서, 리눅스에서 한 번 돌리면 두 줄 고치려다 파일 전체(2천 줄)가 바뀐다.
+    with io.open(DST, 'w', encoding='utf-8', newline='\r\n') as f:
         f.write(body)
     print('OK: %d개 문제 -> %s' % (len(doc['quizzes']), os.path.relpath(DST, ROOT)))
 
