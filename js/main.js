@@ -156,7 +156,10 @@
   // 터치 기기는 기본 켜짐, 마우스 전용 기기는 기본 꺼짐
   var touchCapable = (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
   var padsOn = touchCapable;
-  var scheme = 'dpad';
+  /* 기본은 조이스틱. 방향키 여덟 칸은 자리를 많이 차지하고 손가락이 칸을
+     옮겨 다녀야 해서, 처음 잡는 사람에게는 한 손가락으로 미는 조이스틱이
+     덜 어렵다. 방향키가 편한 사람은 메뉴에서 바꾼다 (시작 화면 ④ 안내). */
+  var scheme = 'stick';
   try {
     var saved = localStorage.getItem(SCHEME_KEY);
     if (saved === 'dpad' || saved === 'stick') scheme = saved;
